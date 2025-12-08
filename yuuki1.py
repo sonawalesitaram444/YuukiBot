@@ -140,54 +140,68 @@ async def track_name(update, context):
         old.append(name)
 
 # ---------------- CONFIG ----------------
-BOT_TOKEN = "8520734510:AAFuqA-MlB59vfnI_zUQiGiRQKEJScaUyFs"   # <-- set your bot token
-OWNER_IDS = [5773908061,7139383373]                 # <-- add owner ids
+BOT_TOKEN = "8520734510:AAFuqA-MlB59vfnI_zUQiGiRQKEJScaUyFs"
+OWNER_IDS = [5773908061, 7139383373]
 BOT_NAME_DISPLAY = "Yuuki_"
 SUPPORT_LINK = "https://t.me/team_bright_lightX"
 CHANNEL_LINK = "https://t.me/+dsCkYEVHJBRiMjI9"
-DATA_DIR = "yuuki_data"
-DB_PATH = os.path.join(DATA_DIR, "users.json")   # <-- now points to users.json with real player data
-TEMP_DIR = os.path.join(DATA_DIR, "tmp")
 # ----------------------------------------
 
-os.makedirs(TEMP_DIR, exist_ok=True)
+import os
+import shutil
+from tinydb import TinyDB, Query
+
+# Prefer persistent volume path if Railway mounted it at /app/yuuki_data
+REPO_DATA_DIR = os.path.join(os.getcwd(), "yuuki_data")
+PERSISTENT_DATA_DIR = "/app/yuuki_data"
+
+# Choose DATA_DIR
+if os.path.isdir(PERSISTENT_DATA_DIR):
+    DATA_DIR = PERSISTENT_DATA_DIR
+else:
+    DATA_DIR = REPO_DATA_DIR
+
 os.makedirs(DATA_DIR, exist_ok=True)
 
+TEMP_DIR = os.path.join(DATA_DIR, "tmp")
+os.makedirs(TEMP_DIR, exist_ok=True)
+
+# Copy repo data → persistent volume (only first deploy)
+try:
+    if DATA_DIR == PERSISTENT_DATA_DIR:
+        if not any(name.endswith(".json") for name in os.listdir(DATA_DIR)):
+            if os.path.isdir(REPO_DATA_DIR):
+                shutil.copytree(REPO_DATA_DIR, DATA_DIR, dirs_exist_ok=True)
+except Exception:
+    pass
+
+DB_PATH = os.path.join(DATA_DIR, "db.json")
+USERS_PATH = os.path.join(DATA_DIR, "users.json")
+APPROVE_PATH = os.path.join(DATA_DIR, "approve_db.json")
+
+import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-# DB
+# Initialize TinyDBs
 db = TinyDB(DB_PATH)
-users_table = db.table("users")
+users_db = TinyDB(USERS_PATH)
+db_approve = TinyDB(APPROVE_PATH)
+
+# Tables
+users_table = users_db.table("users")
 groups_table = db.table("groups")
 packs_table = db.table("packs")
 sessions_table = db.table("sessions")
+banks_table = db.table("banks")
+creators_table = db.table("bank_creators")
+ApproveTable = db_approve.table("approved_creators")
+
+# Queries
 UserQ = Query()
 GroupQ = Query()
 PackQ = Query()
 SessQ = Query()
-# ==== APPROVE SYSTEM DB ====
-from tinydb import TinyDB, Query
-
-db_approve = TinyDB("approve_db.json")
-ApproveTable = db_approve.table("approved_creators")
-# ============================
-
-# -------------------- BANK TABLES --------------------
-banks_table = db.table("banks")           # stores bank info: name, creator, members, deposits, logo
-creators_table = db.table("bank_creators")  # approved users who can create banks
-
-import random
-import time
-from telegram import Update
-from telegram.ext import ContextTypes
-from telegram.helpers import escape_markdown
-from tinydb import TinyDB, Query
-
-# ---------- DATABASE SETUP ----------
-db = TinyDB("users.json")  # or your own path
-users_table = db.table("users")
-UserQ = Query()
 
 # ---------- SHOP STATE ----------
 # Tracks the weekly Moneybag cooldown
