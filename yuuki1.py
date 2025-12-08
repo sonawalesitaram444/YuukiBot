@@ -146,7 +146,7 @@ BOT_NAME_DISPLAY = "Yuuki_"
 SUPPORT_LINK = "https://t.me/team_bright_lightX"
 CHANNEL_LINK = "https://t.me/+dsCkYEVHJBRiMjI9"
 DATA_DIR = "yuuki_data"
-DB_PATH = os.path.join(DATA_DIR, "db.json")
+DB_PATH = os.path.join(DATA_DIR, "users.json")   # <-- now points to users.json with real player data
 TEMP_DIR = os.path.join(DATA_DIR, "tmp")
 # ----------------------------------------
 
