@@ -146,6 +146,121 @@ BOT_NAME_DISPLAY = "Yuuki_"
 SUPPORT_LINK = "https://t.me/team_bright_lightX"
 CHANNEL_LINK = "https://t.me/+dsCkYEVHJBRiMjI9"
 # ----------------------------------------
+import os
+import random
+import time
+import requests
+from telegram import Update
+from telegram.ext import ContextTypes
+
+# Load API key from Railway env
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+# Stickers Yuuki can send
+YUUKI_STICKERS = [
+    "CAACAgIAAxkBAAEBGZJhV6Hx6ZpQo5Vh1gZr6K9p0bcQbgACfwIAAnuXhUh2C0xV1h6sPiQE",
+    "CAACAgIAAxkBAAEBGZNhV6I6O8f02fsTQ8VvMIGwD9l0ZwACGgIAAnuXhUhJ9UfiwJ6HHiQE"
+]
+
+# Example riddles
+RIDDLES = [
+    ("What has keys but can't open locks?", "keyboard"),
+    ("I speak without a mouth and hear without ears. What am I?", "echo"),
+    ("What gets wetter the more it dries?", "towel")
+]
+
+async def yuuki_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+
+    text = (update.message.text or "").lower()
+
+    # Reply trigger
+    try:
+        is_reply_to_bot = (
+            update.message.reply_to_message
+            and update.message.reply_to_message.from_user.id == context.bot.id
+        )
+    except:
+        is_reply_to_bot = False
+
+    # Only respond when called or replied to
+    if "yuuki" not in text and not is_reply_to_bot and not update.message.sticker:
+        return
+
+    user_msg = update.message.text or ""
+
+    # Owner auto reply
+    owner_keywords = [
+        "who is your owner", "owner", "kisne banaya", "creator", "maker",
+        "who made you", "apka malik", "tumhara owner"
+    ]
+    if any(word in user_msg.lower() for word in owner_keywords):
+        await update.message.reply_text("Mera owner @RJVTAX hai 😎⚡ aur batao kya kaam hai?")
+        return
+
+    # Riddles
+    for q, a in RIDDLES:
+        if a in user_msg.lower():
+            await update.message.reply_text(f"😎 Correct! {a} 😏")
+            return
+        elif "riddle" in user_msg.lower():
+            riddle = random.choice(RIDDLES)
+            await update.message.reply_text(f"🧩 Riddle for you: {riddle[0]}")
+            return
+
+    # Memory
+    if "history" not in context.chat_data:
+        context.chat_data["history"] = []
+
+    context.chat_data["history"].append({"role": "user", "content": user_msg})
+    context.chat_data["history"] = context.chat_data["history"][-10:]
+
+    payload = {
+        "model": "llama-3.1-8b-instant",
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are Yuuki, a human—not a bot. "
+                    "You speak in attitude, Hinglish + English mixed, very real and expressive. "
+                    "Never say you're a bot or AI. "
+                    "Act like a real boy with emotions, teasing, sarcasm, and anime vibes. "
+                    "Keep replies short and human. "
+                    "Sometimes send stickers."
+                ),
+            }
+        ] + context.chat_data["history"],
+    }
+
+    # API call
+    for attempt in range(3):
+        try:
+            response = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                json=payload,
+                headers={
+                    "Authorization": f"Bearer {GROQ_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                timeout=40
+            )
+            bot_reply = response.json()["choices"][0]["message"]["content"]
+            break
+        except requests.exceptions.RequestException:
+            if attempt < 2:
+                time.sleep(2)
+                continue
+            bot_reply = "😅 Sorry, network lag aa gaya!"
+
+    context.chat_data["history"].append({"role": "assistant", "content": bot_reply})
+    context.chat_data["history"] = context.chat_data["history"][-10:]
+
+    # Random sticker
+    if random.randint(1, 4) == 2:
+        await update.message.reply_sticker(random.choice(YUUKI_STICKERS))
+
+    await update.message.reply_text(bot_reply)
 
 import os
 import shutil
