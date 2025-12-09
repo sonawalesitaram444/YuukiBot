@@ -128,17 +128,6 @@ async def text_message_handler(update, context):
         )
         return
 
-# TRACK NAME CHANGES
-async def track_name(update, context):
-    user = update.effective_user
-    name = user.first_name
-
-    old = OLD_NAMES[user.id]
-    if old and old[-1] != name:
-        old.append(name)
-    elif not old:
-        old.append(name)
-
 # ---------------- CONFIG ----------------
 BOT_TOKEN = "8520734510:AAFuqA-MlB59vfnI_zUQiGiRQKEJScaUyFs"
 OWNER_IDS = [5773908061, 7139383373]
