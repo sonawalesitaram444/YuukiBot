@@ -3450,6 +3450,12 @@ admin_handlers = [
 other_handlers = [
     MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_members),
     MessageHandler(filters.PHOTO & filters.ChatType.PRIVATE, handle_photos_for_banks),
+
+    # Yuuki chat handlers
+    MessageHandler(filters.TEXT & ~filters.COMMAND, yuuki_chat),
+    MessageHandler(filters.Sticker.ALL, yuuki_chat),  # ✅ fixed
+
+    # Keep your message_router if you want fallback handling
     MessageHandler(filters.TEXT & ~filters.COMMAND, message_router),
 ]
 
