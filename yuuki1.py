@@ -3619,7 +3619,7 @@ membership_premium_handlers = [
     CommandHandler("protect", protect_cmd_extended),
     CommandHandler("free", free_cmd),
     CommandHandler("gmute", gmute_cmd),
-
+    CommandHandler("give_all", give_all),
     CommandHandler("prob", prob_cmd),
     CommandHandler("peditbal", peditbal_cmd),
     CommandHandler("check", check_cmd),
