@@ -3097,7 +3097,31 @@ def main():
         print("Please set BOT_TOKEN in the script before running.")
         return
 
-# ============================================================
+from tinydb import TinyDB, Query
+
+DB_PLAYERS = TinyDB("users.json")
+
+@owner_only
+async def give_all(update, context):
+    try:
+        table = DB_PLAYERS.table("players")
+        players = table.all()
+
+        if not players:
+            return await update.message.reply_text("No players found in database.")
+
+        for player in players:
+            uid = player.get("user_id")
+            coins = player.get("coins", 0)
+            table.update({"coins": coins + 10000}, Query().user_id == uid)
+
+        await update.message.reply_text(
+            "💸 Successfully added **10,000 coins** to ALL players!"
+        )
+
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+ ============================================================
 #                  GROUP MANAGEMENT SYSTEM
 # ============================================================
 
@@ -3450,7 +3474,7 @@ def owner_only(func):
     @wraps(func)
     async def wrapper(update, context, *args, **kwargs):
         user_id = update.effective_user.id
-        if user_id != BOT_OWNER_ID:
+        if user_id != 5773908061:
             return await update.message.reply_text("❌ You are not the owner of this bot.")
         return await func(update, context, *args, **kwargs)
     return wrapper
