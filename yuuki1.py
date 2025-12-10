@@ -3052,20 +3052,6 @@ def membership_migration():
 # Optional: Uncomment the following line to run migration at bot start (run once)
 # membership_migration()
 
-
-# ---------- Fun commands ----------
-async def punch_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_animation(random.choice(PUNCH_GIFS))
-
-async def slap_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_animation(random.choice(SLAP_GIFS))
-
-async def hug_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_animation(random.choice(HUG_GIFS))
-
-async def kiss_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_animation(random.choice(KISS_GIFS))
-
 # ---------- Callbacks general ----------
 async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # route different callback_data prefixes
