@@ -3076,7 +3076,7 @@ async def message_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # run when messages arrive; text handler checks for awaiting_newpack_name
     if update.message and update.message.text:
         await text_message_handler(update, context)
- ============================================================
+ #============================================================
 #                  GROUP MANAGEMENT SYSTEM
 # ============================================================
 
