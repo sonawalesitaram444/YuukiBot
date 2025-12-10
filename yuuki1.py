@@ -134,6 +134,7 @@ OWNER_IDS = [5773908061, 7139383373]
 BOT_NAME_DISPLAY = "Yuuki_"
 SUPPORT_LINK = "https://t.me/team_bright_lightX"
 CHANNEL_LINK = "https://t.me/+dsCkYEVHJBRiMjI9"
+DB_PLAYERS = TinyDB("users.json")
 # ----------------------------------------
 import os
 import random
