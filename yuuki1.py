@@ -142,16 +142,14 @@ import requests
 from telegram import Update
 from telegram.ext import ContextTypes
 
-# Load API key from Railway env
+# API from Railway env
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-# Stickers Yuuki can send
 YUUKI_STICKERS = [
     "CAACAgIAAxkBAAEBGZJhV6Hx6ZpQo5Vh1gZr6K9p0bcQbgACfwIAAnuXhUh2C0xV1h6sPiQE",
     "CAACAgIAAxkBAAEBGZNhV6I6O8f02fsTQ8VvMIGwD9l0ZwACGgIAAnuXhUhJ9UfiwJ6HHiQE"
 ]
 
-# Example riddles
 RIDDLES = [
     ("What has keys but can't open locks?", "keyboard"),
     ("I speak without a mouth and hear without ears. What am I?", "echo"),
@@ -164,7 +162,7 @@ async def yuuki_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = (update.message.text or "").lower()
 
-    # Reply trigger
+    # Check if user is replying to Yuuki
     try:
         is_reply_to_bot = (
             update.message.reply_to_message
@@ -173,29 +171,33 @@ async def yuuki_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except:
         is_reply_to_bot = False
 
-    # Only respond when called or replied to
-    if "yuuki" not in text and not is_reply_to_bot and not update.message.sticker:
+    # ❌ Yuuki should NOT react to stickers unless replied to
+    if update.message.sticker and not is_reply_to_bot:
+        return
+
+    # ❌ Only respond if user mentions yuuki or replies to him
+    if "yuuki" not in text and not is_reply_to_bot:
         return
 
     user_msg = update.message.text or ""
 
-    # Owner auto reply
+    # Owner response
     owner_keywords = [
-        "who is your owner", "owner", "kisne banaya", "creator", "maker",
-        "who made you", "apka malik", "tumhara owner"
+        "owner", "who made you", "kisne banaya",
+        "creator", "maker", "tumhara owner"
     ]
     if any(word in user_msg.lower() for word in owner_keywords):
-        await update.message.reply_text("Mera owner @RJVTAX hai 😎⚡ aur batao kya kaam hai?")
+        await update.message.reply_text("Mera owner @RJVTAX hai 😎⚡ kya hua?")
         return
 
     # Riddles
     for q, a in RIDDLES:
         if a in user_msg.lower():
-            await update.message.reply_text(f"😎 Correct! {a} 😏")
+            await update.message.reply_text(f"Correct 😎 — {a}")
             return
         elif "riddle" in user_msg.lower():
             riddle = random.choice(RIDDLES)
-            await update.message.reply_text(f"🧩 Riddle for you: {riddle[0]}")
+            await update.message.reply_text(f"Riddle time 🤨: {riddle[0]}")
             return
 
     # Memory
@@ -205,24 +207,27 @@ async def yuuki_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.chat_data["history"].append({"role": "user", "content": user_msg})
     context.chat_data["history"] = context.chat_data["history"][-10:]
 
+    # System message — no actions, no AI reveal
     payload = {
         "model": "llama-3.1-8b-instant",
         "messages": [
             {
                 "role": "system",
                 "content": (
-                    "You are Yuuki, a human—not a bot. "
-                    "You speak in attitude, Hinglish + English mixed, very real and expressive. "
-                    "Never say you're a bot or AI. "
-                    "Act like a real boy with emotions, teasing, sarcasm, and anime vibes. "
-                    "Keep replies short and human. "
-                    "Sometimes send stickers."
+                    "You are Yuuki, a real human boy. "
+                    "You talk in short Hinglish sentences with attitude, fun and sarcasm. "
+                    "Never reveal you are AI or bot. "
+                    "No *actions* like *laughs* or *smiles*. "
+                    "Reply like a normal teenager: short, real, casual."
                 ),
             }
         ] + context.chat_data["history"],
     }
 
-    # API call
+    # Show typing…
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+    # API CALL with retry
     for attempt in range(3):
         try:
             response = requests.post(
@@ -234,23 +239,24 @@ async def yuuki_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 },
                 timeout=40
             )
+
             bot_reply = response.json()["choices"][0]["message"]["content"]
             break
-        except requests.exceptions.RequestException:
+        except:
             if attempt < 2:
                 time.sleep(2)
                 continue
-            bot_reply = "😅 Sorry, network lag aa gaya!"
+            bot_reply = "Lag aa gaya yaar 😪"
 
+    # Save to memory
     context.chat_data["history"].append({"role": "assistant", "content": bot_reply})
     context.chat_data["history"] = context.chat_data["history"][-10:]
 
-    # Random sticker
-    if random.randint(1, 4) == 2:
+    # Small chance of sticker
+    if random.randint(1, 7) == 4:
         await update.message.reply_sticker(random.choice(YUUKI_STICKERS))
 
     await update.message.reply_text(bot_reply)
-
 import os
 import shutil
 from tinydb import TinyDB, Query
