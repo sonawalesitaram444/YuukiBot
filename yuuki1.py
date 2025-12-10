@@ -2277,7 +2277,7 @@ SHOP_ITEMS = {
 }
 
 MONEYBAG_COOLDOWN = 7 * 24 * 3600  # 1 week in seconds
-REGISTER_AMOUNT = 5000
+REGISTER_AMOUNT = 50000
 
 # ---------- REGISTER ----------
 async def register_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3090,37 +3090,6 @@ async def message_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # run when messages arrive; text handler checks for awaiting_newpack_name
     if update.message and update.message.text:
         await text_message_handler(update, context)
-
-# ---------- Startup ----------
-def main():
-    if BOT_TOKEN == "PASTE_YOUR_BOT_TOKEN_HERE":
-        print("Please set BOT_TOKEN in the script before running.")
-        return
-
-from tinydb import TinyDB, Query
-
-DB_PLAYERS = TinyDB("users.json")
-
-@owner_only
-async def give_all(update, context):
-    try:
-        table = DB_PLAYERS.table("players")
-        players = table.all()
-
-        if not players:
-            return await update.message.reply_text("No players found in database.")
-
-        for player in players:
-            uid = player.get("user_id")
-            coins = player.get("coins", 0)
-            table.update({"coins": coins + 10000}, Query().user_id == uid)
-
-        await update.message.reply_text(
-            "💸 Successfully added **10,000 coins** to ALL players!"
-        )
-
-    except Exception as e:
-        await update.message.reply_text(f"Error: {e}")
  ============================================================
 #                  GROUP MANAGEMENT SYSTEM
 # ============================================================
@@ -3468,17 +3437,6 @@ def remove_approval(user_id: int):
 def list_approved_users():
     return ApproveTable.all()
 
-from functools import wraps
-
-def owner_only(func):
-    @wraps(func)
-    async def wrapper(update, context, *args, **kwargs):
-        user_id = update.effective_user.id
-        if user_id != 5773908061:
-            return await update.message.reply_text("❌ You are not the owner of this bot.")
-        return await func(update, context, *args, **kwargs)
-    return wrapper
-
 # ========= CREATE BOT =========
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 # ----------------------------------
@@ -3619,7 +3577,6 @@ membership_premium_handlers = [
     CommandHandler("protect", protect_cmd_extended),
     CommandHandler("free", free_cmd),
     CommandHandler("gmute", gmute_cmd),
-    CommandHandler("give_all", give_all),
     CommandHandler("prob", prob_cmd),
     CommandHandler("peditbal", peditbal_cmd),
     CommandHandler("check", check_cmd),
