@@ -3444,6 +3444,17 @@ def remove_approval(user_id: int):
 def list_approved_users():
     return ApproveTable.all()
 
+from functools import wraps
+
+def owner_only(func):
+    @wraps(func)
+    async def wrapper(update, context, *args, **kwargs):
+        user_id = update.effective_user.id
+        if user_id != BOT_OWNER_ID:
+            return await update.message.reply_text("❌ You are not the owner of this bot.")
+        return await func(update, context, *args, **kwargs)
+    return wrapper
+
 # ========= CREATE BOT =========
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 # ----------------------------------
