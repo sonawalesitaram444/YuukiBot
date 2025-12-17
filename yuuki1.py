@@ -704,15 +704,37 @@ async def deletebank_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     banks_table.delete_one({"_id": bank["_id"]})
     await safe_reply(msg, f"🗑️ Bank *{bank_name}* has been deleted.", parse_mode="Markdown")
 
-# ========== FEEDBACK SYSTEM (ONLY /feedback) ==========
-from tinydb import TinyDB, Query
+from functools import wraps
+from datetime import datetime
+from typing import Dict, Any, Optional
+import re
+import shutil
+import logging
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes
 
-feedback_db = TinyDB("feedback.json")
-FeedbackQ = Query()
+# -------------------------------
+# MongoDB Setup (replace with your client/db)
+# -------------------------------
+from pymongo import MongoClient
 
-OWNER_IDS = {5773908061}   # <-- replace with your owner id(s)
+client = MongoClient("mongodb://localhost:27017/")  # Replace with your URI
+db = client["bot_db"]
 
-# /feedback <message>
+users_table = db["users"]
+feedback_table = db["feedback"]
+sessions_table = db["sessions"]
+packs_table = db["packs"]
+groups_table = db["groups"]
+
+OWNER_IDS = {5773908061}  # Replace with your owner ids
+START_COINS = 0  # Default starting coins
+
+logger = logging.getLogger(__name__)
+
+# -------------------------------
+# Feedback System
+# -------------------------------
 async def feedback_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     if not msg:
@@ -720,24 +742,23 @@ async def feedback_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = msg.from_user
     text = " ".join(context.args).strip()
-
     if not text:
         return await msg.reply_text(
             "✏️ **Usage:** /feedback <your feedback>\n"
             "Please tell me what you want to report or suggest.",
-            parse_mode="markdown"
+            parse_mode="Markdown"
         )
 
-    # Store feedback in DB (optional)
-    feedback_rec = {
+    # Store feedback
+    feedback_table.insert_one({
         "user_id": user.id,
         "username": user.username,
         "first_name": user.first_name,
-        "feedback": text
-    }
-    feedback_db.insert(feedback_rec)
+        "feedback": text,
+        "timestamp": datetime.utcnow()
+    })
 
-    # Send to owner(s)
+    # Send feedback to owners
     for owner in OWNER_IDS:
         try:
             await context.bot.send_message(
@@ -746,14 +767,16 @@ async def feedback_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"👤 From: {user.first_name} (@{user.username})\n"
                 f"🆔 ID: {user.id}\n\n"
                 f"💬 Message:\n{text}",
-                parse_mode="markdown"
+                parse_mode="Markdown"
             )
-        except:
-            pass
+        except Exception:
+            continue
 
     await msg.reply_text("✅ Thank you! Your feedback has been sent.")
 
-# -------------------- /register --------------------
+# -------------------------------
+# Register User
+# -------------------------------
 async def register_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     if not msg:
@@ -762,24 +785,84 @@ async def register_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rec = ensure_user_record(user)
     if rec.get("registered"):
         return await msg.reply_text("You are already registered.")
-    rec["coins"] = rec.get("coins", 0) + 100000
-    rec["registered"] = True
-    save_user(rec)
+
+    users_table.update_one(
+        {"user_id": user.id},
+        {"$set": {"registered": True}, "$inc": {"coins": 100000}}
+    )
     await msg.reply_text("✅ Registered! You received 100000 coins.")
 
-# ====== END: NEW FEATURES ======
+# -------------------------------
+# Ensure User Record
+# -------------------------------
+def ensure_user_record(user) -> Dict[str, Any]:
+    uid = int(user.id)
+    rec = users_table.find_one({"user_id": uid})
+    if rec:
+        # Update username/display_name/is_bot
+        users_table.update_one(
+            {"user_id": uid},
+            {"$set": {
+                "username": f"@{user.username}" if getattr(user, "username", None) else rec.get("username"),
+                "display_name": user.first_name or rec.get("display_name"),
+                "is_bot": bool(getattr(user, "is_bot", False))
+            }}
+        )
+        return users_table.find_one({"user_id": uid})
 
-async def welcome_new_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    for member in update.message.new_chat_members:
-        try:
-            await update.message.reply_text(
-                f"Welcome {member.mention_html()} ❤️🤗!",
-                parse_mode="HTML"
-            )
-        except Exception:
-            continue
+    rec = {
+        "user_id": uid,
+        "username": f"@{user.username}" if getattr(user, "username", None) else None,
+        "display_name": user.first_name or None,
+        "is_bot": bool(getattr(user, "is_bot", False)),
+        "coins": START_COINS,
+        "kills": 0,
+        "dead": False,
+        "protected_until": 0.0,
+        "last_daily": 0.0,
+        "inventory": {},
+        "sticker_pack": None,
+        "registered": False,
+    }
+    users_table.insert_one(rec)
+    return rec
 
-# utilities
+# -------------------------------
+# Save User Record
+# -------------------------------
+def save_user(rec: Dict[str, Any]):
+    users_table.update_one({"user_id": rec["user_id"]}, {"$set": rec}, upsert=True)
+
+def get_user_by_id(uid: int) -> Optional[Dict[str, Any]]:
+    return users_table.find_one({"user_id": int(uid)})
+
+# -------------------------------
+# Mention Helpers
+# -------------------------------
+def mention_clickable(rec: Dict[str, Any]) -> str:
+    if rec.get("username"):
+        return rec["username"]
+    name = rec.get("display_name") or f"User{rec['user_id']}"
+    return f"[{name}](tg://user?id={rec['user_id']})"
+
+def now_ts() -> float:
+    return datetime.utcnow().timestamp()
+
+# -------------------------------
+# Sessions Helpers
+# -------------------------------
+def save_session(user_id: int, data: Dict[str, Any]):
+    sessions_table.update_one({"user_id": int(user_id)}, {"$set": data}, upsert=True)
+
+def load_session(user_id: int) -> Optional[Dict[str, Any]]:
+    return sessions_table.find_one({"user_id": int(user_id)})
+
+def clear_session(user_id: int):
+    sessions_table.delete_one({"user_id": int(user_id)})
+
+# -------------------------------
+# Owner Only Decorator
+# -------------------------------
 def owner_only(func):
     @wraps(func)
     async def wrapped(update: Update, context: ContextTypes.DEFAULT_TYPE, *a, **kw):
@@ -789,275 +872,15 @@ def owner_only(func):
         await update.effective_message.reply_text("❌ Only the owner may use this command.")
     return wrapped
 
-def now_ts() -> float:
-    return datetime.utcnow().timestamp()
-
-def ensure_user_record(user) -> Dict[str, Any]:
-    uid = int(user.id)
-    rec = users_table.get(UserQ.user_id == uid)
-    if rec:
-        # update username/display_name/is_bot
-        rec["username"] = (f"@{user.username}" if getattr(user, "username", None) else rec.get("username"))
-        rec["display_name"] = user.first_name or rec.get("display_name")
-        rec["is_bot"] = bool(getattr(user, "is_bot", False))
-        users_table.upsert(rec, UserQ.user_id == uid)
-        return rec
-    rec = {
-        "user_id": uid,
-        "username": (f"@{user.username}" if getattr(user, "username", None) else None),
-        "display_name": user.first_name or None,
-        "is_bot": bool(getattr(user, "is_bot", False)),
-        "coins": START_COINS,
-        "kills": 0,
-        "dead": False,
-        "protected_until": 0.0,
-        "last_daily": 0.0,
-        "inventory": {},
-        # sticker pack record key (internal DB pack_key), created by /newpack or /own first use
-        "sticker_pack": None,
-    }
-    users_table.insert(rec)
-    return rec
-
-def save_user(rec: Dict[str, Any]):
-    users_table.upsert(rec, UserQ.user_id == rec["user_id"])
-
-def get_user_by_id(uid: int) -> Optional[Dict[str, Any]]:
-    return users_table.get(UserQ.user_id == int(uid))
-
-def set_group_open(chat_id: int, val: bool):
-    groups_table.upsert({"chat_id": int(chat_id), "economy_enabled": bool(val)}, GroupQ.chat_id == int(chat_id))
-
-def check_group_open(chat_id: int) -> bool:
-    rec = groups_table.get(GroupQ.chat_id == int(chat_id))
-    return bool(rec and rec.get("economy_enabled", False))
-
-def mention_clickable(rec: Dict[str, Any]) -> str:
-    if rec.get("username"):
-        return rec["username"]
-    name = rec.get("display_name") or f"User{rec['user_id']}"
-    return f"[{name}](tg://user?id={rec['user_id']})"
-
-def stylize_name(name: str) -> str:
-    return name
-
+# -------------------------------
+# FFMPEG Check
+# -------------------------------
 def ffmpeg_available() -> bool:
     return shutil.which("ffmpeg") is not None
 
 FFMPEG = ffmpeg_available()
 logger.info("ffmpeg available: %s", FFMPEG)
 
-# ---------- Sticker packs DB helpers ----------
-# packs_table records: { 'owner_id': int, 'pack_key': str, 'title': str, 'created': bool }
-def pack_key_for_user_name(raw_name: str, bot_username: str) -> str:
-    s = re.sub(r'[^A-Za-z0-9_]', '_', raw_name).strip('_')
-    s = re.sub(r'_+', '_', s)[:30]
-    botname = re.sub(r'[^A-Za-z0-9_]', '', bot_username or "bot")
-    full = f"{s}_{botname}"
-    return full[:64]
-
-def save_pack_record(owner_id: int, pack_key: str, title: str, created: bool=False):
-    packs_table.upsert({'owner_id': int(owner_id), 'pack_key': pack_key, 'title': title, 'created': bool(created)},
-                       (PackQ.owner_id == int(owner_id)) & (PackQ.pack_key == pack_key))
-
-def list_user_packs(owner_id: int):
-    return packs_table.search(PackQ.owner_id == int(owner_id))
-
-def get_pack(owner_id: int, pack_key: str):
-    return packs_table.get((PackQ.owner_id == int(owner_id)) & (PackQ.pack_key == pack_key))
-
-def remove_pack_record(owner_id: int, pack_key: str):
-    packs_table.remove((PackQ.owner_id == int(owner_id)) & (PackQ.pack_key == pack_key))
-
-# sessions_table used to store temporary state: {user_id, awaiting_newpack_name, awaiting_own_name, last_action}
-def save_session(user_id: int, data: Dict[str, Any]):
-    sessions_table.upsert({'user_id': int(user_id), **data}, SessQ.user_id == int(user_id))
-
-def load_session(user_id: int) -> Optional[Dict[str, Any]]:
-    res = sessions_table.get(SessQ.user_id == int(user_id))
-    return res
-
-def clear_session(user_id: int):
-    sessions_table.remove(SessQ.user_id == int(user_id))
-
-# ---------- UI Keyboards & START/HELP MENU (replacement) ----------
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ContextTypes, CallbackQueryHandler, CommandHandler
-
-# ---------- IMPORTS ----------
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ContextTypes, CallbackQueryHandler, CommandHandler
-
-BOT_OWNER = "RJVTAX"
-OWNER_URL = f"https://t.me/{BOT_OWNER}"
-SUPPORT_LINK = "https://t.me/team_bright_lightX"
-CHANNEL_LINK = "https://t.me/YUUKIUPDATES"
-
-# ---------- INLINE KEYBOARDS ----------
-def main_menu_keyboard():
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("🎭 Economy", callback_data="menu:economy"),
-            InlineKeyboardButton("🥳 Fun", callback_data="menu:fun")
-        ],
-        [
-            InlineKeyboardButton("🎮 Game", callback_data="menu:game"),
-            InlineKeyboardButton("👥 Group Help", callback_data="menu:grouphelp")
-        ],
-        [
-            InlineKeyboardButton("👑 Owner 👑", url=OWNER_URL)
-        ]
-    ])
-
-def back_keyboard():
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("🔙 Back", callback_data="menu:main")
-        ],
-        [
-            InlineKeyboardButton("👑 Owner 👑", url=OWNER_URL)
-        ]
-    ])
-
-def start_keyboard(addme_url):
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("💬 Support Chat", SUPPORT_URL),
-            InlineKeyboardButton("✅ Updates Channel", CHANNEL_URL)
-        ],
-        [
-            InlineKeyboardButton("✨ Add Me To Your Group ✨", url=addme_url)
-        ],
-        [
-            InlineKeyboardButton("👑 Owner 👑", url=OWNER_URL)
-        ]
-    ])
-
-# ---------- START COMMAND ----------
-async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.message
-
-    # Prepare Add-Me link
-    try:
-        me = await context.bot.get_me()
-        addme_url = f"https://t.me/{me.username}?startgroup=true"
-    except:
-        addme_url = "https://t.me/Im_yuukiBot?startgroup=true"
-
-    text = (
-        "✨ 𝑾𝒆𝒍𝒄𝒐𝒎𝒆 𝒕𝒐 𝒀𝒖𝒖𝒌𝒊_ ✨\n\n"
-        "⚡ 𝒀𝒐𝒖𝒓 𝒖𝒍𝒕𝒊𝒎𝒂𝒕𝒆 𝒈𝒓𝒐𝒖𝒑 𝒂𝒔𝒔𝒊𝒔𝒕𝒂𝒏𝒕\n"
-        "💰 𝑬𝒄𝒐𝒏𝒐𝒎𝒚 • 🎮 𝑮𝒂𝒎𝒆𝒔 • 🥳 𝑭𝒖𝒏 • 🛡 𝑴𝒐𝒅𝒆𝒓𝒂𝒕𝒊𝒐𝒏\n"
-        "🔧 𝑨𝒅𝒗𝒂𝒏𝒄𝒆𝒅 𝒈𝒄 𝒕𝒐𝒐𝒍𝒔 & 𝒔𝒎𝒂𝒓𝒕 𝒂𝒖𝒕𝒐-𝒓𝒆𝒑𝒍𝒚\n\n"
-        "❤️ 𝑴𝒂𝒅𝒆 𝒃𝒚 @{BOT_OWNER}"
-    )
-
-    await msg.reply_text(
-        text,
-        reply_markup=start_keyboard(addme_url),
-        parse_mode="Markdown"
-    )
-
-# ---------- HELP COMMAND ----------
-async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message:
-        return
-
-    text = (
-        "✨ 𝒀𝒖𝒖𝒌𝒊_ — 𝑯𝒆𝒍𝒑 𝑴𝒆𝒏𝒖 ✨\n\n"
-        "💖 𝑻𝒉𝒂𝒏𝒌 𝒚𝒐𝒖 𝒇𝒐𝒓 𝒄𝒉𝒐𝒐𝒔𝒊𝒏𝒈 𝒀𝒖𝒖𝒌𝒊_\n"
-        "🤖 𝑨 𝒑𝒐𝒘𝒆𝒓𝒇𝒖𝒍 𝒂𝒏𝒅 𝒇𝒖𝒏 𝑻𝒆𝒍𝒆𝒈𝒓𝒂𝒎 𝒃𝒐𝒕\n\n"
-        "📌 𝑺𝒆𝒍𝒆𝒄𝒕 𝒂 𝒄𝒂𝒕𝒆𝒈𝒐𝒓𝒚 𝒃𝒆𝒍𝒐𝒘 👇"
-    )
-
-    await update.message.reply_text(
-        text,
-        reply_markup=main_menu_keyboard()
-    )
-
-
-# ---------- CALLBACK HANDLER ----------
-async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-
-    data = q.data or ""
-    if ":" not in data:
-        return
-
-    section = data.split(":", 1)[1]
-
-    # ---------- MAIN MENU ----------
-    if section == "main":
-        await q.edit_message_text(
-            "✨ 𝒀𝒖𝒖𝒌𝒊_ — 𝑯𝒆𝒍𝒑 𝑴𝒆𝒏𝒖 ✨\n\n"
-            "📌 𝑺𝒆𝒍𝒆𝒄𝒕 𝒂 𝒄𝒂𝒕𝒆𝒈𝒐𝒓𝒚 👇",
-            reply_markup=main_menu_keyboard()
-        )
-        return
-
-    # ---------- ECONOMY ----------
-    if section == "economy":
-        txt = (
-            "💰 𝑬𝒄𝒐𝒏𝒐𝒎𝒚 𝑪𝒐𝒎𝒎𝒂𝒏𝒅𝒔\n\n"
-            "• /open — Enable economy\n"
-            "• /close — Disable economy\n"
-            "• /daily — Daily reward\n"
-            "• /bal — Check balance\n"
-            "• /toprich — Richest users\n"
-            "• /topkill — Kill leaderboard\n\n"
-            "🎯 𝑨𝒄𝒕𝒊𝒐𝒏𝒔\n"
-            "• /give • /rob • /kill\n"
-            "• /revive • /protect\n\n"
-            "🛍 𝑺𝒉𝒐𝒑\n"
-            "/register /shop /buy /gift\n\n"
-            "🏦 𝑩𝒂𝒏𝒌\n"
-            "/createbank /deposit /withdraw\n"
-            "/bank /budget /getloan"
-        )
-        await q.edit_message_text(txt, reply_markup=back_keyboard())
-        return
-
-    # ---------- FUN ----------
-    if section == "fun":
-        txt = (
-            "🥳 𝑭𝒖𝒏 𝑪𝒐𝒎𝒎𝒂𝒏𝒅𝒔\n\n"
-            "• /punch\n"
-            "• /slap\n"
-            "• /kiss\n"
-            "• /hug\n"
-            "• /ping"
-        )
-        await q.edit_message_text(txt, reply_markup=back_keyboard())
-        return
-
-    # ---------- GAME ----------
-    if section == "game":
-        txt = (
-            "🎮 𝑮𝒂𝒎𝒆 𝑪𝒐𝒎𝒎𝒂𝒏𝒅𝒔\n\n"
-            "• /kill\n"
-            "• /rob\n"
-            "• /revive\n"
-            "• /protect"
-        )
-        await q.edit_message_text(txt, reply_markup=back_keyboard())
-        return
-
-    # ---------- GROUP ----------
-    if section == "grouphelp":
-        txt = (
-            "👥 𝑮𝒓𝒐𝒖𝒑 𝑴𝒂𝒏𝒂𝒈𝒆𝒎𝒆𝒏𝒕\n\n"
-            "• /promote\n"
-            "• /demote\n"
-            "• /ban\n"
-            "• /mute\n"
-            "• /unmute\n"
-            "• /warn\n"
-            "• /setwelcome\n"
-            "• /setrules"
-        )
-        await q.edit_message_text(txt, reply_markup=back_keyboard())
-        return
 # ---------- group open/close ----------
 async def open_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
