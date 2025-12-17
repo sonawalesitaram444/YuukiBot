@@ -210,7 +210,7 @@ async def yuuki_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # System message — no actions, no AI reveal
     payload = {
-        "model": "llama-3.1-8b-instant",
+        "model": "moonshotai/kimi-k2-instruct-0905",
         "messages": [
             {
                 "role": "system",
