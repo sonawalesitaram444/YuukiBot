@@ -187,7 +187,7 @@ async def yuuki_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "owner", "who made you", "kisne banaya",
         "creator", "maker", "tumhara owner"
     ]
-    if any(word in user_msg.lower() for word in owner_keywords):
+    if any(word in user_msg.lower() for word in ....._keywords):
         await update.message.reply_text("Mera owner @RJVTAX hai 😎⚡ kya hua?")
         return
 
@@ -215,7 +215,7 @@ async def yuuki_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
             {
                 "role": "system",
                 "content": (
-                    "Your name is yuuki who chats on telegram like a real boy.'
+                    "Your name is yuuki who chats on telegram like a real boy."
                     "Don't overreact don't be so dramatic just chat like a normal  human."
                     "Always reply in hinglish( hindi letters in English)."
                     "If someone specially asks about your owner - your owner is @RJVTAX otherwise keep it secret."
