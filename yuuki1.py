@@ -1092,7 +1092,14 @@ async def kill_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(f"{stylize_name(killer.get('display_name') or killer.get('username'))} killed {stylize_name(victim.get('display_name') or victim.get('username'))}. Reward: {reward} coins. Victim will revive in 6 hours.")
 
-# ---------- reset single player ----------
+import random
+import time
+from datetime import datetime, timedelta
+from telegram import Update
+from telegram.ext import ContextTypes
+from telegram.helpers import escape_markdown
+
+# ---------- RESET SINGLE PLAYER ----------
 @owner_only
 async def resetplayer_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
@@ -1101,281 +1108,194 @@ async def resetplayer_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     target_user = None
 
-    # 1) If command is a reply → use that user
     if msg.reply_to_message:
         target_user = msg.reply_to_message.from_user
-
-    # 2) If argument is provided → check ID or username
     elif context.args:
         arg = context.args[0]
-
-        # Numeric ID
-        if arg.isdigit():
-            try:
-                target_user = await context.bot.get_chat(int(arg))
-            except Exception:
-                return await msg.reply_text("❌ Invalid user ID.")
-
-        # Username starting with @
-        elif arg.startswith("@"):
-            try:
-                target_user = await context.bot.get_chat(arg)
-            except Exception:
-                return await msg.reply_text("❌ Invalid username.")
-        else:
-            return await msg.reply_text("❌ Invalid argument, provide a user ID or @username.")
-
-    # 3) No reply & no args → reset self
+        try:
+            target_user = await context.bot.get_chat(int(arg)) if arg.isdigit() else await context.bot.get_chat(arg)
+        except:
+            return await msg.reply_text("❌ Invalid user.")
     else:
         target_user = msg.from_user
 
-    # Ensure the user record exists
     rec = ensure_user_record(target_user)
 
-    # Reset all relevant fields
-    rec["coins"] = START_COINS
-    rec["kills"] = 0
-    rec["dead"] = False
-    rec["dead_until"] = None
-    rec["protected_until"] = 0
-    rec["inventory"] = {}
-    rec["sticker_pack"] = None
-    save_user(rec)
+    users_col.update_one(
+        {"user_id": rec["user_id"]},
+        {"$set": {
+            "coins": START_COINS,
+            "kills": 0,
+            "dead": False,
+            "dead_until": None,
+            "protected_until": 0,
+            "inventory": {},
+            "sticker_pack": None
+        }}
+    )
 
     await msg.reply_text(
-        f"🔄 Reset data for **{stylize_name(rec.get('display_name') or getattr(target_user, 'username', 'Unknown'))}**.",
+        f"🔄 Reset data for **{rec.get('display_name','User')}**",
         parse_mode="Markdown"
     )
 
-# ---------- reset all players ----------
+# ---------- RESET ALL ----------
 @owner_only
 async def resetall_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.message
-    if not msg:
-        return
+    users_col.delete_many({})
+    banks_col.delete_many({})
+    sessions_col.delete_many({})
+    await update.message.reply_text("⚠️ ALL DATA RESET", parse_mode="Markdown")
 
-    # Truncate all relevant tables
-    users_table.truncate()
-    banks_table.truncate()
-    sessions_table.truncate()
-
-    await msg.reply_text("⚠️ All players' data has been whiped out completely.", parse_mode="Markdown")
-
-# ---------- kill command ----------
+# ---------- KILL ----------
 async def kill_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     if chat.type != "private" and not check_group_open(chat.id):
-        return await update.message.reply_text("⛔ Economy commands are disabled in this group to reopen: /open .")
+        return await update.message.reply_text("⛔ Economy closed.")
 
     if not update.message.reply_to_message:
-        return await update.message.reply_text("Reply to the user you want to kill.")
+        return await update.message.reply_text("Reply to someone.")
 
     killer = ensure_user_record(update.effective_user)
     victim = ensure_user_record(update.message.reply_to_message.from_user)
 
-    if killer.get("dead"):
-        return await update.message.reply_text("💀 You are dead, you can’t kill anyone!")
+    if killer["dead"]:
+        return await update.message.reply_text("💀 You are dead.")
 
-    if victim.get("is_bot"):
-        return await update.message.reply_text("🤖 Target detected as bot — action cancelled.")
+    if victim["is_bot"]:
+        return await update.message.reply_text("🤖 Bot detected.")
 
-    now = now_ts()
+    now = time.time()
     if victim.get("protected_until", 0) > now:
-        remaining = int(victim["protected_until"] - now)
-        hours = remaining // 3600
-        minutes = (remaining % 3600) // 60
-        return await update.message.reply_text(
-            f"🛡️ {stylize_name(victim.get('display_name') or victim.get('username'))} is protected, Kill failed!"
-        )
+        return await update.message.reply_text("🛡️ Target protected.")
 
-    if victim.get("dead"):
-        return await update.message.reply_text("⚰️ Target is already dead!")
+    if victim["dead"]:
+        return await update.message.reply_text("Already dead.")
 
-    # Kill success
     reward = random.randint(KILL_MIN_REWARD, KILL_MAX_REWARD)
-    killer["kills"] = killer.get("kills", 0) + 1
-    killer["coins"] += reward
-    victim["dead"] = True
-    victim["dead_until"] = (datetime.utcnow() + timedelta(hours=6)).timestamp()  # auto revive in 6h
-    save_user(killer)
-    save_user(victim)
 
-    txt = (
-        f"💀 {stylize_name(killer.get('display_name') or killer.get('username'))} "
-        f"killed {stylize_name(victim.get('display_name') or victim.get('username'))}!\n"
-        f"💰 Reward: +${reward}\n"
-        f"⏳ They will revive automatically in 6 hours."
+    users_col.update_one(
+        {"user_id": killer["user_id"]},
+        {"$inc": {"kills": 1, "coins": reward}}
     )
-    await update.message.reply_text(txt)
 
-import random
-import time
-from telegram import Update
-from telegram.ext import ContextTypes
-from telegram.helpers import escape_markdown
+    users_col.update_one(
+        {"user_id": victim["user_id"]},
+        {"$set": {
+            "dead": True,
+            "dead_until": (datetime.utcnow() + timedelta(hours=6)).timestamp()
+        }}
+    )
 
-# ---------- SHOP STATE ----------
-# Tracks the weekly Moneybag cooldown
-SHOP_STATE = {}
-
-# ---------- CONFIG ----------
-SHOP_ITEMS = {
-    "rose": {"display": "Rose", "price": 200, "emoji": "🌹", "type": "gift"},
-    "moneybag": {"display": "Moneybag", "price": 1000, "emoji": "💰", "type": "money"},
-    # Add more gifts here if needed
-}
-
-MONEYBAG_COOLDOWN = 7 * 24 * 3600  # 1 week in seconds
-REGISTER_AMOUNT = 5000
+    await update.message.reply_text(
+        f"💀 {killer['display_name']} killed {victim['display_name']}\n💰 +{reward}"
+    )
 
 # ---------- REGISTER ----------
 async def register_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != "private":
-        return await update.message.reply_text("❗ Use /register in DM for claiming $5000.")
+        return
 
     user = ensure_user_record(update.effective_user)
-    if user.get("registered", False):
-        return await update.message.reply_text("✅ You have already registered before.")
+    if user.get("registered"):
+        return await update.message.reply_text("Already registered.")
 
-    user["registered"] = True
-    user["coins"] = user.get("coins", 0) + REGISTER_AMOUNT
-    save_user(user)
-    await update.message.reply_text(f"🎉 Registration successful! You received ${REGISTER_AMOUNT}.")
+    users_col.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"registered": True}, "$inc": {"coins": REGISTER_AMOUNT}}
+    )
+
+    await update.message.reply_text(f"🎉 Registered +{REGISTER_AMOUNT}")
 
 # ---------- SHOP ----------
+SHOP_ITEMS = {
+    "rose": {"display": "Rose", "price": 200, "emoji": "🌹"},
+    "moneybag": {"display": "Moneybag", "price": 1000, "emoji": "💰"}
+}
+
 async def shop_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat = update.effective_chat
-    if chat.type != "private" and not check_group_open(chat.id):
-        return await update.message.reply_text("⛔ Economy commands are disabled in this group.")
-
-    lines = ["🛒 *Shop Items:*"]
+    lines = ["🛒 *Shop*"]
     now = time.time()
-    moneybag_last = SHOP_STATE.get("moneybag_last", 0)
-    for key, item in SHOP_ITEMS.items():
-        name = escape_markdown(item['display'], version=2)
-        if key == "moneybag":
-            if now - moneybag_last < MONEYBAG_COOLDOWN:
-                status = "⚠️ Sold out"
-            else:
-                status = f"{item['price']} 💰"
-            lines.append(f"{item['emoji']} [{name}] \\- {status}  (`{key}`)")
-        else:
-            lines.append(f"{item['emoji']} [{name}] \\- {item['price']} 💰  (`{key}`)")
+    state = shop_col.find_one({"_id": "moneybag"}) or {"last": 0}
 
-    lines.append("\nUse: /buy <item_key> <amount>  |  /gift <item_key> <amount> (reply to user)")
-    lines.append("⚠️ Set @username to make gifting possible.")
+    for k, v in SHOP_ITEMS.items():
+        if k == "moneybag" and now - state["last"] < MONEYBAG_COOLDOWN:
+            lines.append(f"{v['emoji']} {v['display']} — SOLD")
+        else:
+            lines.append(f"{v['emoji']} {v['display']} — {v['price']} (`{k}`)")
+
     await update.message.reply_markdown_v2("\n".join(lines))
 
 # ---------- BUY ----------
 async def buy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = ensure_user_record(update.effective_user)
-    if len(context.args) < 1:
-        return await update.message.reply_text("Usage: /buy <item_key> <amount>")
+    if not context.args:
+        return
 
-    key = context.args[0].lower()
-    amt = 1
-    if len(context.args) >= 2:
-        try:
-            amt = int(context.args[1])
-        except:
-            return await update.message.reply_text("Invalid amount.")
-    if amt <= 0:
-        return await update.message.reply_text("Amount must be positive.")
-
+    key = context.args[0]
+    amt = int(context.args[1]) if len(context.args) > 1 else 1
     if key not in SHOP_ITEMS:
-        return await update.message.reply_text("Item not found.")
+        return
 
-    price = SHOP_ITEMS[key]['price'] * amt
+    price = SHOP_ITEMS[key]["price"] * amt
     if user["coins"] < price:
         return await update.message.reply_text("Not enough coins.")
 
-    # MONEYBAG SPECIAL RULE
     if key == "moneybag":
-        now = time.time()
-        last_time = SHOP_STATE.get("moneybag_last", 0)
-        if now - last_time < MONEYBAG_COOLDOWN:
-            return await update.message.reply_text("⚠️ Moneybag already sold this week! Come back later.")
-        SHOP_STATE["moneybag_last"] = now
-        gained = random.randint(1000, 10000)
-        user["coins"] += gained
-        save_user(user)
-        await update.message.reply_text(f"💰 You bought Moneybag for {price} 💰 and got {gained} coins!")
-        return
+        state = shop_col.find_one({"_id": "moneybag"}) or {"last": 0}
+        if time.time() - state["last"] < MONEYBAG_COOLDOWN:
+            return await update.message.reply_text("Sold out.")
 
-    # normal purchase
-    user["coins"] -= price
-    inv = user.get("inventory", {})
-    inv[key] = inv.get(key, 0) + amt
-    user["inventory"] = inv
-    save_user(user)
-    await update.message.reply_text(f"✅ Purchased {amt}x {SHOP_ITEMS[key]['display']} for {price} 💰")
+        gained = random.randint(1000, 10000)
+        shop_col.update_one({"_id": "moneybag"}, {"$set": {"last": time.time()}}, upsert=True)
+        users_col.update_one({"user_id": user["user_id"]}, {"$inc": {"coins": gained}})
+        return await update.message.reply_text(f"💰 You got {gained}")
+
+    users_col.update_one(
+        {"user_id": user["user_id"]},
+        {"$inc": {f"inventory.{key}": amt, "coins": -price}}
+    )
+
+    await update.message.reply_text("✅ Purchased")
 
 # ---------- INVENTORY ----------
 async def inventory_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = ensure_user_record(update.effective_user)
     inv = user.get("inventory", {})
     if not inv:
-        return await update.message.reply_text("🎒 Your inventory is empty.")
+        return await update.message.reply_text("Empty inventory.")
 
-    lines = ["🎒 *Your Inventory:*"]
-    for key, qty in inv.items():
-        if key in SHOP_ITEMS:
-            item = SHOP_ITEMS[key]
-            name = escape_markdown(item['display'], version=2)
-            lines.append(f"{item['emoji']} [{name}] \\- {qty}")
-    await update.message.reply_markdown_v2("\n".join(lines))
+    lines = ["🎒 Inventory"]
+    for k, v in inv.items():
+        item = SHOP_ITEMS.get(k)
+        if item:
+            lines.append(f"{item['emoji']} {item['display']} — {v}")
+    await update.message.reply_text("\n".join(lines))
 
 # ---------- GIFT ----------
 async def gift_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat = update.effective_chat
-    if chat.type != "private" and not check_group_open(chat.id):
-        return await update.message.reply_text("⛔ Economy commands are disabled in this group.")
-
-    if len(context.args) < 2:
-        return await update.message.reply_text("Usage: /gift <item_key> <amount> (reply to user)")
-
-    key = context.args[0].lower()
-    try:
-        amt = int(context.args[1])
-    except:
-        return await update.message.reply_text("Invalid amount.")
-
-    if amt <= 0:
-        return await update.message.reply_text("Amount must be positive.")
-
-    if key not in SHOP_ITEMS:
-        return await update.message.reply_text("Item not found.")
-
     if not update.message.reply_to_message:
-        return await update.message.reply_text("Reply to the user you want to gift.")
+        return
 
-    target_user = update.message.reply_to_message.from_user
-    if target_user.id == update.effective_user.id:
-        return await update.message.reply_text("You cannot gift items to yourself.")
+    key = context.args[0]
+    amt = int(context.args[1])
 
     sender = ensure_user_record(update.effective_user)
-    target = ensure_user_record(target_user)
+    target = ensure_user_record(update.message.reply_to_message.from_user)
 
-    inv = sender.get("inventory", {})
-    if inv.get(key, 0) < amt:
-        return await update.message.reply_text("You don’t have enough of that item.")
+    if sender["inventory"].get(key, 0) < amt:
+        return
 
-    # Remove from sender
-    inv[key] -= amt
-    if inv[key] == 0:
-        del inv[key]
-    sender["inventory"] = inv
-    save_user(sender)
-
-    # Add to receiver
-    recv_inv = target.get("inventory", {})
-    recv_inv[key] = recv_inv.get(key, 0) + amt
-    target["inventory"] = recv_inv
-    save_user(target)
-
-    await update.message.reply_text(
-        f"🎁 You gifted {amt}x {SHOP_ITEMS[key]['display']} to {stylize_name(target.get('display_name') or target.get('username'))}!"
+    users_col.update_one(
+        {"user_id": sender["user_id"]},
+        {"$inc": {f"inventory.{key}": -amt}}
     )
+    users_col.update_one(
+        {"user_id": target["user_id"]},
+        {"$inc": {f"inventory.{key}": amt}}
+    )
+
+    await update.message.reply_text("🎁 Gift sent")
 
 # --------------------------
 # Membership / Premium / Infinity System + Fun commands
