@@ -303,6 +303,11 @@ async def approvelist_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append(f"• UserID: {u.get('user_id')}")
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes
+from pymongo import ReturnDocument
+from bson.objectid import ObjectId
+
 # -----------------------
 # /addbank <name> — join a bank
 # -----------------------
@@ -315,7 +320,7 @@ async def addbank_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await safe_reply(msg, "Usage: /addbank <bank_name>\nUse /banklist to see available banks.")
 
     bank_name = " ".join(context.args).strip()
-    bank = find_bank(bank_name)
+    bank = banks_table.find_one({"name": bank_name})
 
     if not bank:
         return await safe_reply(msg, "That bank does not exist. Use /banklist to view available banks.")
@@ -327,8 +332,10 @@ async def addbank_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await safe_reply(msg, "You are already a member of this bank.")
 
     # Add user to member list
-    bank.setdefault("members", []).append(user.id)
-    save_bank(bank)
+    banks_table.update_one(
+        {"_id": bank["_id"]},
+        {"$addToSet": {"members": user.id}}
+    )
 
     await safe_reply(
         msg,
@@ -347,8 +354,7 @@ async def createbank_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await msg.reply_text("Please DM me to create a bank. Use /createbank <bank_name>.")
 
     user = msg.from_user
-    Q = Query()
-    approved = creators_table.get(Q.user_id == user.id)
+    approved = creators_table.find_one({"user_id": user.id})
     if not approved:
         return await msg.reply_text("❌ You are not approved to create a bank. Ask the bot owner to /approve you first.")
 
@@ -356,10 +362,14 @@ async def createbank_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await msg.reply_text("Usage: /createbank <bank_name> — after this, send the bank logo photo.")
 
     bank_name = " ".join(context.args).strip()
-    if find_bank(bank_name):
+    if banks_table.find_one({"name": bank_name}):
         return await msg.reply_text("A bank with that name already exists. Choose another name.")
 
-    sessions_table.upsert({"user_id": user.id, "action": "create_bank", "bank_name": bank_name}, lambda r: r.get("user_id") == user.id)
+    sessions_table.update_one(
+        {"user_id": user.id},
+        {"$set": {"action": "create_bank", "bank_name": bank_name}},
+        upsert=True
+    )
     await msg.reply_text(f"✅ '{bank_name}' reserved. Now send the photo for the bank logo.")
 
 # -----------------------
@@ -370,8 +380,7 @@ async def handle_photos_for_banks(update: Update, context: ContextTypes.DEFAULT_
     if not msg or msg.chat.type != "private" or not msg.photo:
         return
     user = msg.from_user
-    Q = Query()
-    sess = sessions_table.get(Q.user_id == user.id)
+    sess = sessions_table.find_one({"user_id": user.id})
     if not sess or sess.get("action") != "create_bank":
         return
 
@@ -387,8 +396,8 @@ async def handle_photos_for_banks(update: Update, context: ContextTypes.DEFAULT_
         "deposits": {},
         "budget": 0
     }
-    save_bank(bank)
-    sessions_table.remove(Q.user_id == user.id)
+    banks_table.insert_one(bank)
+    sessions_table.delete_one({"user_id": user.id})
 
     caption = f"🏦 *{bank_name}*\nOwner: {pretty_name_from_user(user)}\nMembers: 0\nTotal deposits: 0\n\nBank created successfully! Use /banklist or /addbank {bank_name} to join."
     try:
@@ -399,7 +408,7 @@ async def handle_photos_for_banks(update: Update, context: ContextTypes.DEFAULT_
 # /banklist — show all banks
 async def banklist_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
-    banks = banks_table.all()
+    banks = list(banks_table.find({}))
 
     if not banks:
         return await msg.reply_text("No banks have been created yet.")
@@ -413,11 +422,10 @@ async def banklist_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     lines.append("\nTo join a bank: /addbank <bank_name>")
 
-    # Use simple reply_text
     await msg.reply_text("\n".join(lines))
 
 # -----------------------
-# /deposit <amount> — DM only (add to user's deposit in their bank)
+# /deposit <amount> — DM only
 # -----------------------
 async def deposit_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
@@ -437,30 +445,26 @@ async def deposit_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await msg.reply_text("Invalid amount.")
 
     # find the bank where user is a member
-    user_bank = None
-    for b in banks_table.all():
-        if user.id in b.get("members", []):
-            user_bank = b; break
+    user_bank = banks_table.find_one({"members": user.id})
     if not user_bank:
         return await msg.reply_text("You are not a member of any bank. Use /addbank <bank_name> to join a bank.")
 
-    # ensure user has enough coins in global balance
     rec = ensure_user_record(user)
     if rec.get("coins", 0) < amt:
         return await msg.reply_text("Insufficient coins in your balance to deposit.")
 
+    # Deduct coins
     rec["coins"] = rec.get("coins", 0) - amt
     save_user(rec)
 
     deposits = user_bank.get("deposits", {})
     deposits[str(user.id)] = deposits.get(str(user.id), 0) + amt
-    user_bank["deposits"] = deposits
-    save_bank(user_bank)
+    banks_table.update_one({"_id": user_bank["_id"]}, {"$set": {"deposits": deposits}})
 
     await msg.reply_text(f"✅ Deposited ${amt} into *{user_bank['name']}*.", parse_mode="Markdown")
 
 # -----------------------
-# /withdraw <amount> — works anywhere (checks deposit)
+# /withdraw <amount> — works anywhere
 # -----------------------
 async def withdraw_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
@@ -477,10 +481,7 @@ async def withdraw_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await msg.reply_text("Invalid amount.")
 
     user = msg.from_user
-    user_bank = None
-    for b in banks_table.all():
-        if user.id in b.get("members", []):
-            user_bank = b; break
+    user_bank = banks_table.find_one({"members": user.id})
     if not user_bank:
         return await msg.reply_text("You are not a member of any bank. Use /addbank <bank_name> to join one.")
 
@@ -490,157 +491,13 @@ async def withdraw_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await msg.reply_text("You haven't deposited this much — withdraw failed.")
 
     deposits[str(user.id)] = user_amt - amt
-    user_bank["deposits"] = deposits
-    save_bank(user_bank)
+    banks_table.update_one({"_id": user_bank["_id"]}, {"$set": {"deposits": deposits}})
 
     rec = ensure_user_record(user)
     rec["coins"] = rec.get("coins", 0) + amt
     save_user(rec)
 
     await msg.reply_text(f"✅ Withdrawn ${amt} from *{user_bank['name']}*.", parse_mode="Markdown")
-
-import re
-
-def esc(text: str) -> str:
-    """Escape MarkdownV2 for Telegram."""
-    if not text:
-        return ""
-    return re.sub(r'([_*\[\]()~`>#+\-=|{}.!])', r'\\\1', str(text))
-
-
-# -----------------------
-# /bank — view bank profile
-# -----------------------
-async def bank_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.message
-    name = " ".join(context.args).strip() if context.args else None
-
-    bank = find_bank(name) if name else None
-
-    # auto-detect bank of user if no name
-    if not bank:
-        user = msg.from_user
-        for b in banks_table.all():
-            if user.id in b.get("members", []):
-                bank = b
-                break
-
-    if not bank:
-        return await msg.reply_text(
-            "No bank found. Use /banklist to see all banks or /bank <bank_name>.",
-        )
-
-    owner_name = bank.get("creator_username") or f"User{bank.get('creator_id')}"
-    total_deposits = sum(bank.get("deposits", {}).values()) if bank.get("deposits") else 0
-    members = bank.get("members", [])
-
-    # Escape text for MarkdownV2
-    text = (
-        f"🏦 *{esc(bank['name'])}*\n"
-        f"👤 Owner: {esc(owner_name)}\n"
-        f"👥 Members: {len(members)}\n"
-        f"💰 Total deposits: ${total_deposits}\n"
-        f"📦 Budget: ${bank.get('budget',0)}"
-    )
-
-    if bank.get("logo_file_id"):
-        try:
-            await context.bot.send_photo(
-                chat_id=msg.chat.id,
-                photo=bank.get("logo_file_id"),
-                caption=text,
-                parse_mode="MarkdownV2"
-            )
-            return
-        except:
-            pass
-
-    await msg.reply_text(text, parse_mode="MarkdownV2")
-
-
-# -----------------------
-# /bankstatus — personal balance
-# -----------------------
-async def bankstatus_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.message
-    user = msg.from_user
-
-    user_bank = None
-    for b in banks_table.all():
-        if user.id in b.get("members", []):
-            user_bank = b
-            break
-
-    if not user_bank:
-        return await msg.reply_text("You are not a member of any bank.")
-
-    deposit = user_bank.get("deposits", {}).get(str(user.id), 0)
-
-    text = (
-        f"🏦 *{esc(user_bank['name'])}* — Your account\n"
-        f"👤 Owner: {esc(user_bank.get('creator_username') or 'User' + str(user_bank.get('creator_id')))}\n"
-        f"💵 Your deposit: ${deposit}\n"
-        f"📦 Bank budget: ${user_bank.get('budget',0)}"
-    )
-
-    await msg.reply_text(text, parse_mode="MarkdownV2")
-
-# -----------------------
-# /budget <bankname> <amount> — owner requests budget assignment to bank
-# Owner receives a prompt to set budget via /budget_set <bankname> <amount>
-# -----------------------
-async def budget_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.message
-    if not msg:
-        return
-    if len(context.args) < 2:
-        return await msg.reply_text("Usage: /budget <bank_name> <amount>  — this notifies the bot owner to allocate funds to that bank.")
-    bank_name = context.args[0]
-    try:
-        amount = int(context.args[1])
-    except:
-        return await msg.reply_text("Invalid amount.")
-    bank = find_bank(bank_name)
-    if not bank:
-        return await msg.reply_text("Bank not found.")
-    # notify bot owner(s)
-    owner_ids = OWNER_IDS
-    notified = 0
-    for oid in owner_ids:
-        try:
-            kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ Set budget", callback_data=f"budget_set|{bank_name}|{amount}|{bank.get('creator_id')}")]])
-            await context.bot.send_message(oid, f"📣 Bank budget request:\nBank: *{bank_name}*\nRequested amount: ${amount}\nCreator: {pretty_name_from_user(type('u',(),{'id':bank.get('creator_id'),'username':bank.get('creator_username')}))}", parse_mode="Markdown", reply_markup=kb)
-            notified += 1
-        except Exception:
-            pass
-    await msg.reply_text(f"✅ Your budget request was sent to the bot owner(s) ({notified} notified). They can approve using the inline button or use /budget_set <bankname> <amount>.")
-
-# Callback to handle budget_set inline action by owner
-async def callback_budget_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    parts = q.data.split("|")
-    if len(parts) < 4:
-        return await q.edit_message_text("Invalid data.")
-    _, bank_name, amount_s, creator_id_s = parts[:4]
-    try:
-        amount = int(amount_s)
-    except:
-        return await q.edit_message_text("Invalid amount.")
-    bank = find_bank(bank_name)
-    if not bank:
-        return await q.edit_message_text("Bank not found.")
-    # only owners can set via this button
-    if q.from_user.id not in OWNER_IDS:
-        return await q.edit_message_text("Only bot owner can set budgets.")
-    bank["budget"] = amount
-    save_bank(bank)
-    # notify bank creator
-    try:
-        await context.bot.send_message(int(creator_id_s), f"📣 Your bank *{bank_name}* has been allocated a budget of ${amount} by the bot owner.", parse_mode="Markdown")
-    except:
-        pass
-    await q.edit_message_text(f"✅ Budget ${amount} set for bank *{bank_name}*.", parse_mode="Markdown")
 
 # -----------------------
 # /lottery — owner-only run lottery distribution
