@@ -3050,7 +3050,43 @@ def owner_only(func):
 # ============================================================
 # 📩 DM ANNOUNCEMENT — /dm_anou
 # ============================================================
+@owner_only
+async def dm_anou_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message
 
+    # Get message text
+    if msg.reply_to_message and msg.reply_to_message.text:
+        text = msg.reply_to_message.text
+    else:
+        text = " ".join(context.args)
+
+    if not text:
+        return await msg.reply_text("❌ Usage: /dm_anou <message> or reply to a message")
+
+    sent = 0
+    failed = 0
+
+    for user in users_table.all():
+        uid = user.get("user_id")
+        if not uid:
+            continue
+
+        try:
+            await context.bot.send_message(
+                chat_id=uid,
+                text=f"📢 **Yuuki Announcement**\n\n{text}",
+                parse_mode="Markdown"
+            )
+            sent += 1
+        except Exception:
+            failed += 1
+
+    await msg.reply_text(
+        f"✅ **DM Broadcast Completed**\n\n"
+        f"👤 Users Reached: {sent}\n"
+        f"❌ Failed: {failed}",
+        parse_mode="Markdown"
+    )
 
 # ============================================================
 # 🌍 GLOBAL GROUP ANNOUNCEMENT — /glo_anou
