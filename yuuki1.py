@@ -187,7 +187,7 @@ async def yuuki_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "owner", "who made you", "kisne banaya",
         "creator", "maker", "tumhara owner"
     ]
-    if any(word in user_msg.lower() for word in ....._keywords):
+    if any(word in user_msg.lower() for word in bruh_keywords):
         await update.message.reply_text("Mera owner @RJVTAX hai 😎⚡ kya hua?")
         return
 
