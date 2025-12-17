@@ -1632,78 +1632,93 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------- HELP COMMAND ----------
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "✨ 𝒀𝒖𝒖𝒌𝒊_ — 𝑯𝒆𝒍𝒑 𝑴𝒆𝒏𝒖\n𝑪𝒉𝒐𝒐𝒔𝒆 𝒂 𝒄𝒂𝒕𝒆𝒈𝒐𝒓𝒚 👇",
-        reply_markup=main_menu_keyboard(),
-        parse_mode="Markdown"
+    if not update.message:
+        return
+
+    text = (
+        "✨ 𝒀𝒖𝒖𝒌𝒊_ — 𝑯𝒆𝒍𝒑 𝑴𝒆𝒏𝒖 ✨\n\n"
+        "💖 𝑻𝒉𝒂𝒏𝒌 𝒚𝒐𝒖 𝒇𝒐𝒓 𝒄𝒉𝒐𝒐𝒔𝒊𝒏𝒈 𝒀𝒖𝒖𝒌𝒊_\n"
+        "🤖 𝑨 𝒑𝒐𝒘𝒆𝒓𝒇𝒖𝒍 𝒂𝒏𝒅 𝒇𝒖𝒏 𝑻𝒆𝒍𝒆𝒈𝒓𝒂𝒎 𝒃𝒐𝒕\n\n"
+        "📌 𝑺𝒆𝒍𝒆𝒄𝒕 𝒂 𝒄𝒂𝒕𝒆𝒈𝒐𝒓𝒚 𝒃𝒆𝒍𝒐𝒘 👇"
     )
+
+    await update.message.reply_text(
+        text,
+        reply_markup=main_menu_keyboard()
+    )
+
 
 # ---------- CALLBACK HANDLER ----------
 async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
 
-    section = q.data.split(":", 1)[1]
+    data = q.data or ""
+    if ":" not in data:
+        return
 
-    # MAIN MENU
+    section = data.split(":", 1)[1]
+
+    # ---------- MAIN MENU ----------
     if section == "main":
         await q.edit_message_text(
-            "✨ 𝒀𝒖𝒖𝒌𝒊_ — 𝑯𝒆𝒍𝒑 𝑴𝒆𝒏𝒖\n𝑺𝒆𝒍𝒆𝒄𝒕 𝒂 𝒄𝒂𝒕𝒆𝒈𝒐𝒓𝒚 👇",
-            reply_markup=main_menu_keyboard(),
-            parse_mode="Markdown"
+            "✨ 𝒀𝒖𝒖𝒌𝒊_ — 𝑯𝒆𝒍𝒑 𝑴𝒆𝒏𝒖 ✨\n\n"
+            "📌 𝑺𝒆𝒍𝒆𝒄𝒕 𝒂 𝒄𝒂𝒕𝒆𝒈𝒐𝒓𝒚 👇",
+            reply_markup=main_menu_keyboard()
         )
         return
 
-    # ECONOMY
+    # ---------- ECONOMY ----------
     if section == "economy":
         txt = (
-            "💰 *Yuuki — Economy Commands*\n\n"
+            "💰 𝑬𝒄𝒐𝒏𝒐𝒎𝒚 𝑪𝒐𝒎𝒎𝒂𝒏𝒅𝒔\n\n"
             "• /open — Enable economy\n"
-            "• /close — Disable\n"
+            "• /close — Disable economy\n"
             "• /daily — Daily reward\n"
-            "• /bal — Balance\n"
+            "• /bal — Check balance\n"
             "• /toprich — Richest users\n"
             "• /topkill — Kill leaderboard\n\n"
-            "• /give — Gift coins\n"
-            "• /rob — Rob users\n"
-            "• /kill — Kill a user\n"
-            "• /revive — Revive someone\n"
-            "• /protect — Buy protection\n\n"
-            "🛍 *Shop*\n/register • /shop • /buy • /gift\n\n"
-            "🏦 *Bank*\n/createbank • /deposit • /withdraw\n/bank • /budget • /getloan"
+            "🎯 𝑨𝒄𝒕𝒊𝒐𝒏𝒔\n"
+            "• /give • /rob • /kill\n"
+            "• /revive • /protect\n\n"
+            "🛍 𝑺𝒉𝒐𝒑\n"
+            "/register /shop /buy /gift\n\n"
+            "🏦 𝑩𝒂𝒏𝒌\n"
+            "/createbank /deposit /withdraw\n"
+            "/bank /budget /getloan"
         )
-        await q.edit_message_text(txt, reply_markup=back_keyboard(), parse_mode="Markdown")
+        await q.edit_message_text(txt, reply_markup=back_keyboard())
         return
 
-    # FUN
+    # ---------- FUN ----------
     if section == "fun":
         txt = (
-            "🥳 *Fun Commands*\n"
+            "🥳 𝑭𝒖𝒏 𝑪𝒐𝒎𝒎𝒂𝒏𝒅𝒔\n\n"
             "• /punch\n"
             "• /slap\n"
             "• /kiss\n"
             "• /hug\n"
             "• /ping"
         )
-        await q.edit_message_text(txt, reply_markup=back_keyboard(), parse_mode="Markdown")
+        await q.edit_message_text(txt, reply_markup=back_keyboard())
         return
 
-    # GAME
+    # ---------- GAME ----------
     if section == "game":
         txt = (
-            "🎮 *Game Commands*\n"
+            "🎮 𝑮𝒂𝒎𝒆 𝑪𝒐𝒎𝒎𝒂𝒏𝒅𝒔\n\n"
             "• /kill\n"
             "• /rob\n"
             "• /revive\n"
             "• /protect"
         )
-        await q.edit_message_text(txt, reply_markup=back_keyboard(), parse_mode="Markdown")
+        await q.edit_message_text(txt, reply_markup=back_keyboard())
         return
 
-    # GROUP HELP
+    # ---------- GROUP ----------
     if section == "grouphelp":
         txt = (
-            "👥 *Group Help*\n\n"
+            "👥 𝑮𝒓𝒐𝒖𝒑 𝑴𝒂𝒏𝒂𝒈𝒆𝒎𝒆𝒏𝒕\n\n"
             "• /promote\n"
             "• /demote\n"
             "• /ban\n"
@@ -1713,9 +1728,8 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /setwelcome\n"
             "• /setrules"
         )
-        await q.edit_message_text(txt, reply_markup=back_keyboard(), parse_mode="Markdown")
+        await q.edit_message_text(txt, reply_markup=back_keyboard())
         return
-
 # ---------- group open/close ----------
 async def open_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
