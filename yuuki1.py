@@ -499,9 +499,12 @@ async def withdraw_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await msg.reply_text(f"✅ Withdrawn ${amt} from *{user_bank['name']}*.", parse_mode="Markdown")
 
+import random
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import ContextTypes
+
 # -----------------------
-# /lottery — owner-only run lottery distribution
-# Behavior: choose one jackpot winner who gets 30000, others (sampled up to 100000 users) get random 1000-9000
+# /lottery — owner-only
 # -----------------------
 async def lottery_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
@@ -510,37 +513,31 @@ async def lottery_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = msg.from_user.id
     if uid not in OWNER_IDS:
         return await msg.reply_text("Only bot owner can run the lottery.")
-    # gather users
-    all_users = users_table.all()
+
+    all_users = list(users_table.find({}))
     if not all_users:
         return await msg.reply_text("No users in database to run a lottery.")
-    # cap to 100000 to prevent huge loops
+
     cap = 100000
-    if len(all_users) > cap:
-        sampled = random.sample(all_users, cap)
-    else:
-        sampled = all_users
-    # compute wallet updates
+    sampled = random.sample(all_users, cap) if len(all_users) > cap else all_users
+
     jackpot_winner = random.choice(sampled)
-    jackpot_uid = int(jackpot_winner.get("user_id"))
+    jackpot_uid = int(jackpot_winner["user_id"])
     JACKPOT = 30000
-    winners_sent = 0
-    failures = 0
+    winners_sent, failures = 0, 0
+
     for rec in sampled:
         try:
-            uid_t = int(rec.get("user_id"))
-            rec_db = users_table.get(UserQ.user_id == uid_t) or rec
+            uid_t = int(rec["user_id"])
             if uid_t == jackpot_uid:
-                recdb = users_table.get(UserQ.user_id == uid_t) or rec
-            if uid_t == jackpot_uid:
-                rec_db["coins"] = rec_db.get("coins", 0) + JACKPOT
+                users_table.update_one({"user_id": uid_t}, {"$inc": {"coins": JACKPOT}})
                 note = f"🎉 Lottery jackpot! You won ${JACKPOT}!"
             else:
                 gain = random.randint(1000, 9000)
-                rec_db["coins"] = rec_db.get("coins", 0) + gain
+                users_table.update_one({"user_id": uid_t}, {"$inc": {"coins": gain}})
                 note = f"🎟️ You won ${gain} in the lottery!"
-            users_table.upsert(rec_db, UserQ.user_id == uid_t)
-            # try DM (best-effort)
+
+            # DM best-effort
             try:
                 await context.bot.send_message(uid_t, note)
                 winners_sent += 1
@@ -548,7 +545,10 @@ async def lottery_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 failures += 1
         except Exception:
             failures += 1
-    await msg.reply_text(f"Lottery distributed to {len(sampled)} users. DMs sent: {winners_sent}; failures: {failures}. Jackpot winner: User{jackpot_uid}")
+
+    await msg.reply_text(
+        f"Lottery distributed to {len(sampled)} users. DMs sent: {winners_sent}; failures: {failures}. Jackpot winner: User{jackpot_uid}"
+    )
 
 # -----------------------
 # /leavebank <bank_name>
@@ -562,24 +562,20 @@ async def leavebank_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await safe_reply(msg, "Usage: /leavebank <bank_name>")
 
     bank_name = " ".join(context.args).strip()
-    bank = find_bank(bank_name)
+    bank = banks_table.find_one({"name": bank_name})
 
     if not bank:
         return await safe_reply(msg, "That bank does not exist.")
 
     user = msg.from_user
-
     if user.id not in bank.get("members", []):
         return await safe_reply(msg, "You are not a member of this bank.")
 
-    # Remove user
-    bank["members"].remove(user.id)
-    save_bank(bank)
-
+    banks_table.update_one({"_id": bank["_id"]}, {"$pull": {"members": user.id}})
     await safe_reply(msg, f"👋 You have left the bank *{bank_name}*.", parse_mode="Markdown")
 
 # -----------------------
-# /all <message> — mention all admins (safer than mentioning everyone)
+# /all <message>
 # -----------------------
 async def all_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
@@ -593,30 +589,24 @@ async def all_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         admins = await context.bot.get_chat_administrators(chat.id)
     except Exception:
         return await msg.reply_text("Failed to fetch admins.")
-    mentions = []
-    for a in admins:
-        u = a.user
-        if getattr(u, "username", None):
-            mentions.append(f"@{u.username}")
-        else:
-            mentions.append(f"[{u.first_name}](tg://user?id={u.id})")
-    mention_text = " ".join(mentions)
-    out = f"{text}\n\n{mention_text}"
+
+    mentions = [
+        f"@{a.user.username}" if getattr(a.user, "username", None) else f"[{a.user.first_name}](tg://user?id={a.user.id})"
+        for a in admins
+    ]
+    out = f"{text}\n\n{' '.join(mentions)}"
     await msg.reply_markdown(out)
 
-# ============================
+# -----------------------
 # /getloan <amount>
-# Request a loan from your bank (must be approved)
-# ============================
+# -----------------------
 async def getloan_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     if not msg:
         return
-
     user = msg.from_user
     uid = user.id
 
-    # amount validation
     if not context.args:
         return await msg.reply_text("Usage: /getloan <amount>")
     try:
@@ -626,18 +616,19 @@ async def getloan_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except:
         return await msg.reply_text("Invalid amount. Use numbers only.")
 
-    # get bank record
-    bank = banks_table.get(BankQ.name == bank_name)
+    # Find bank where user is member
+    bank = banks_table.find_one({"members": uid})
     if not bank:
         return await msg.reply_text("Error: Your bank no longer exists.")
 
+    bank_name = bank["name"]
     creator_id = bank.get("creator_id")
     budget = bank.get("budget", 0)
 
     if amount > budget:
         return await msg.reply_text(f"Your bank does not have enough budget for this loan.\nAvailable: {budget}")
 
-    # Notify bank creator for approval
+    # Notify bank creator
     text = (
         f"📨 Loan Request\n"
         f"User: {user.first_name} ({uid})\n"
@@ -659,41 +650,33 @@ async def getloan_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except:
         await msg.reply_text("Bank creator cannot be contacted. Try again later.")
 
-# =============================
+# -----------------------
 # Loan approval callback
-# =============================
+# -----------------------
 async def loan_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
     data = query.data.split("|")
+    if len(data) != 4:
+        return await query.edit_message_text("Invalid callback data.")
+
     action, uid, amount, bankname = data
     uid = int(uid)
     amount = int(amount)
 
-    bank = banks_table.get(BankQ.name == bankname)
+    bank = banks_table.find_one({"name": bankname})
     if not bank:
         return await query.edit_message_text("Bank not found.")
 
-    # bank creator check
     if query.from_user.id != bank.get("creator_id"):
         return await query.answer("Only bank creator can approve.", show_alert=True)
 
-    # approve loan
     if action == "loan_ok":
-        user_rec = ensure_user_record({"id": uid})
-        user_rec["coins"] = user_rec.get("coins", 0) + amount
-        save_user(user_rec)
-
-        bank["budget"] -= amount
-        banks_table.update(bank, BankQ.name == bankname)
-
-        await context.bot.send_message(
-            uid,
-            f"🎉 Your loan request of {amount} was approved!"
-        )
+        users_table.update_one({"user_id": uid}, {"$inc": {"coins": amount}}, upsert=True)
+        banks_table.update_one({"_id": bank["_id"]}, {"$inc": {"budget": -amount}})
+        await context.bot.send_message(uid, f"🎉 Your loan request of {amount} was approved!")
         await query.edit_message_text("Loan approved successfully.")
-
     else:
         await context.bot.send_message(uid, "❌ Your loan request was rejected.")
         await query.edit_message_text("Loan rejected.")
@@ -710,176 +693,16 @@ async def deletebank_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await safe_reply(msg, "Usage: /deletebank <bank_name>")
 
     bank_name = " ".join(context.args).strip()
-    bank = find_bank(bank_name)
-
+    bank = banks_table.find_one({"name": bank_name})
     if not bank:
         return await safe_reply(msg, "That bank does not exist.")
 
     user = msg.from_user
-
-    # Check creator
     if bank.get("creator_id") != user.id:
         return await safe_reply(msg, "❌ Only the bank creator can delete this bank.")
 
-    # Delete bank
-    Q = Query()
-    banks_table.remove(Q.name == bank_name)
-
+    banks_table.delete_one({"_id": bank["_id"]})
     await safe_reply(msg, f"🗑️ Bank *{bank_name}* has been deleted.", parse_mode="Markdown")
-
-# End of bank+economy module
-
-# ===============================
-# 🔰 BANK CALLBACKS (FULL CODE)
-# ===============================
-
-# -------- JOIN REQUEST ACCEPT / DECLINE --------
-async def callback_bank_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    
-    data = query.data or ""
-    parts = data.split("|")
-    if len(parts) != 3:
-        return await query.edit_message_text("Invalid data.")
-
-    action, bank_name, user_id = parts[0], parts[1], int(parts[2])
-
-    bank = find_bank(bank_name)
-    if not bank:
-        return await query.edit_message_text("This bank no longer exists.")
-
-    # Only bank owner can accept / decline
-    if query.from_user.id != bank.get("creator_id"):
-        return await query.edit_message_text("Only the bank owner can respond to join requests.")
-
-    # Approve join
-    if action == "bank_join":
-        if user_id in bank.get("members", []):
-            return await query.edit_message_text("User already a member.")
-
-        bank.setdefault("members", []).append(user_id)
-        save_bank(bank)
-
-        try:
-            await context.bot.send_message(
-                user_id,
-                f"✅ You have been approved to join *{bank_name}* by {query.from_user.mention_html()}!",
-                parse_mode="HTML"
-            )
-        except:
-            pass
-
-        return await query.edit_message_text("User approved and notified.")
-
-    # Decline join
-    else:
-        try:
-            await context.bot.send_message(
-                user_id,
-                f"❌ Your request to join *{bank_name}* was declined.",
-            )
-        except:
-            pass
-
-        return await query.edit_message_text("Declined and user notified.")
-
-
-# -------- JOIN CANCELLED BY USER --------
-async def callback_bank_join_no(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    await query.edit_message_text("❌ You cancelled joining the bank.")
-
-
-# ===============================
-# 🔰 LEAVE BANK CALLBACKS
-# ===============================
-
-# -------- USER CONFIRMS LEAVING BANK --------
-async def callback_leavebank_yes(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    data = query.data or ""
-    parts = data.split("|")
-
-    if len(parts) != 3:
-        return await query.edit_message_text("Invalid leavebank data.")
-
-    _, bank_name, user_id = parts
-    user_id = int(user_id)
-
-    bank = find_bank(bank_name)
-    if not bank:
-        return await query.edit_message_text("This bank no longer exists.")
-
-    # Only the user himself can confirm
-    if query.from_user.id != user_id:
-        return await query.edit_message_text("❌ You cannot confirm on behalf of another user.")
-
-    # Check membership
-    if user_id not in bank.get("members", []):
-        return await query.edit_message_text("❌ You are not a member of this bank.")
-
-    # Remove user
-    bank["members"].remove(user_id)
-    save_bank(bank)
-
-    await query.edit_message_text(
-        f"👋 You have left *{bank_name}*.",
-        parse_mode="Markdown"
-    )
-
-
-# -------- USER CANCELS LEAVE BANK --------
-async def callback_leavebank_no(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    await query.edit_message_text("❌ Cancelled leaving the bank.")
-
-
-# ===============================
-# 🔰 DELETE BANK CALLBACKS
-# ===============================
-
-# -------- BANK OWNER CONFIRMS DELETE --------
-async def callback_deletebank_yes(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    data = query.data or ""
-    parts = data.split("|")
-
-    if len(parts) != 3:
-        return await query.edit_message_text("Invalid deletebank data.")
-
-    _, bank_name, creator_id = parts
-    creator_id = int(creator_id)
-
-    bank = find_bank(bank_name)
-    if not bank:
-        return await query.edit_message_text("Bank does not exist anymore.")
-
-    # Only creator can delete
-    if query.from_user.id != creator_id:
-        return await query.edit_message_text("❌ Only the bank creator can delete this bank.")
-
-    # Delete bank
-    Q = Query()
-    banks_table.remove(Q.name == bank_name)
-
-    await query.edit_message_text(
-        f"🗑️ Bank *{bank_name}* has been permanently deleted.",
-        parse_mode="Markdown"
-    )
-
-
-# -------- CREATOR CANCELS DELETE --------
-async def callback_deletebank_no(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    await query.edit_message_text("❌ Bank deletion cancelled.")
 
 # ========== FEEDBACK SYSTEM (ONLY /feedback) ==========
 from tinydb import TinyDB, Query
