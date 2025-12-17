@@ -3050,46 +3050,6 @@ def owner_only(func):
 # ============================================================
 # 📩 DM ANNOUNCEMENT — /dm_anou
 # ============================================================
-@owner_only
-async def dm_anou_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.message
-
-    # get text
-    if msg.reply_to_message and msg.reply_to_message.text:
-        text = msg.reply_to_message.text
-    else:
-        text = " ".join(context.args)
-
-    if not text:
-        return await msg.reply_text("❌ Usage: /dm_anou <message | reply>")
-
-    sent = 0
-
-    for user in users_db.all():
-        uid = user.get("user_id")
-        if not uid:
-            continue
-
-        try:
-            await context.bot.send_message(
-                chat_id=uid,
-                text=(
-                    "📢 𝒀𝒖𝒖𝒌𝒊_ 𝑨𝒏𝒏𝒐𝒖𝒏𝒄𝒆𝒎𝒆𝒏𝒕\n\n"
-                    f"{text}"
-                )
-            )
-            sent += 1
-            await asyncio.sleep(0.05)  # flood-safe
-
-        except Exception:
-            # REMOVE DEAD / BLOCKED USER
-            users_db.remove(UserQ.user_id == uid)
-
-    await msg.reply_text(
-        f"✅ DM Broadcast Completed\n\n"
-        f"📨 Successfully Delivered: {sent}\n"
-        f"💀 Dead users auto-removed"
-    )
 
 
 # ============================================================
@@ -3099,41 +3059,30 @@ async def dm_anou_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def glo_anou_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
 
-    # get text
-    if msg.reply_to_message and msg.reply_to_message.text:
+    if msg.reply_to_message:
         text = msg.reply_to_message.text
     else:
         text = " ".join(context.args)
 
     if not text:
-        return await msg.reply_text("❌ Usage: /glo_anou <message | reply>")
+        return await msg.reply_text("❌ Usage: /glo_anou <message> or reply")
 
     sent = 0
+    dead = 0
 
-    for grp in groups_db.all():
-        chat_id = grp.get("chat_id")
-        if not chat_id:
-            continue
-
+    for g in groups_table.all():
         try:
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=(
-                    "📢 𝑮𝒍𝒐𝒃𝒂𝒍 𝑨𝒏𝒏𝒐𝒖𝒏𝒄𝒆𝒎𝒆𝒏𝒕\n\n"
-                    f"{text}"
-                )
-            )
+            await context.bot.send_message(g["chat_id"], f"📣 **Yuuki Announcement**\n\n{text}")
             sent += 1
-            await asyncio.sleep(0.05)
-
         except Exception:
-            # REMOVE LEFT / DELETED GROUP
-            groups_db.remove(GroupQ.chat_id == chat_id)
+            dead += 1
+            groups_table.remove(GroupQ.chat_id == g["chat_id"])
 
     await msg.reply_text(
-        f"✅ Global Broadcast Completed\n\n"
+        f"✅ **Global Broadcast Completed**\n\n"
         f"📣 Groups Reached: {sent}\n"
-        f"💀 Dead groups auto-removed"
+        f"💀 Dead groups auto-removed: {dead}",
+        parse_mode="Markdown"
     )
 
 # -----------------------------
@@ -3542,6 +3491,15 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML"
     )
 
+async def save_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    if chat and chat.type in ("group", "supergroup"):
+        if not groups_table.get(GroupQ.chat_id == chat.id):
+            groups_table.insert({
+                "chat_id": chat.id,
+                "title": chat.title
+            })
+
 def is_approved(user_id: int) -> bool:
     return ApproveTable.contains(Query().user_id == user_id)
 
@@ -3568,6 +3526,16 @@ async def skip_old_updates(app):
         print(f"Skipped {len(updates)} old updates.")
     except Exception as e:
         print("Error skipping updates:", e)
+
+other_handlers = [
+    MessageHandler(filters.ChatType.GROUPS, save_group),  # ✅ MUST BE FIRST
+
+    MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_members),
+    MessageHandler(filters.PHOTO & filters.ChatType.PRIVATE, handle_photos_for_banks),
+    MessageHandler(filters.TEXT & ~filters.COMMAND, yuuki_chat),
+    MessageHandler(filters.Sticker.ALL, yuuki_chat),
+    MessageHandler(filters.TEXT & ~filters.COMMAND, message_router),
+]
 
 # ----- Management -----
 management_handlers = [
