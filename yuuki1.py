@@ -2291,12 +2291,12 @@ SHOP_ITEMS = {
 }
 
 MONEYBAG_COOLDOWN = 7 * 24 * 3600  # 1 week in seconds
-REGISTER_AMOUNT = 50000
+REGISTER_AMOUNT = 5000
 
 # ---------- REGISTER ----------
 async def register_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != "private":
-        return await update.message.reply_text("❗ Use /register in DM for claiming $100000.")
+        return await update.message.reply_text("❗ Use /register in DM for claiming $5000.")
 
     user = ensure_user_record(update.effective_user)
     if user.get("registered", False):
@@ -3017,6 +3017,124 @@ async def giftpremium_cmd(update, context):
     rec_t["premium_until"] = start + MEMBERSHIP_DAYS*86400
     save_user(giver); save_user(rec_t)
     await msg.reply_text(f"✅ Gifted premium to {pretty_name_from_user(target_user)} until {format_ts(rec_t['premium_until'])}.")
+
+# ============================================================
+#                BROADCAST SYSTEM (0 FAILURE)
+# ============================================================
+
+from tinydb import TinyDB, Query
+from telegram import Update
+from telegram.ext import CommandHandler, ContextTypes
+import asyncio
+
+# ---------------- DATABASE ----------------
+users_db = TinyDB("Users.json")
+groups_db = TinyDB("Groups.json")
+
+UserQ = Query()
+GroupQ = Query()
+
+# ---------------- OWNER IDS ----------------
+OWNER_IDS = {5773908061}  # add more if needed
+
+
+# ---------------- OWNER CHECK ----------------
+def owner_only(func):
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if update.effective_user.id not in OWNER_IDS:
+            return
+        return await func(update, context)
+    return wrapper
+
+
+# ============================================================
+# 📩 DM ANNOUNCEMENT — /dm_anou
+# ============================================================
+@owner_only
+async def dm_anou_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message
+
+    # get text
+    if msg.reply_to_message and msg.reply_to_message.text:
+        text = msg.reply_to_message.text
+    else:
+        text = " ".join(context.args)
+
+    if not text:
+        return await msg.reply_text("❌ Usage: /dm_anou <message | reply>")
+
+    sent = 0
+
+    for user in users_db.all():
+        uid = user.get("user_id")
+        if not uid:
+            continue
+
+        try:
+            await context.bot.send_message(
+                chat_id=uid,
+                text=(
+                    "📢 𝒀𝒖𝒖𝒌𝒊_ 𝑨𝒏𝒏𝒐𝒖𝒏𝒄𝒆𝒎𝒆𝒏𝒕\n\n"
+                    f"{text}"
+                )
+            )
+            sent += 1
+            await asyncio.sleep(0.05)  # flood-safe
+
+        except Exception:
+            # REMOVE DEAD / BLOCKED USER
+            users_db.remove(UserQ.user_id == uid)
+
+    await msg.reply_text(
+        f"✅ DM Broadcast Completed\n\n"
+        f"📨 Successfully Delivered: {sent}\n"
+        f"💀 Dead users auto-removed"
+    )
+
+
+# ============================================================
+# 🌍 GLOBAL GROUP ANNOUNCEMENT — /glo_anou
+# ============================================================
+@owner_only
+async def glo_anou_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message
+
+    # get text
+    if msg.reply_to_message and msg.reply_to_message.text:
+        text = msg.reply_to_message.text
+    else:
+        text = " ".join(context.args)
+
+    if not text:
+        return await msg.reply_text("❌ Usage: /glo_anou <message | reply>")
+
+    sent = 0
+
+    for grp in groups_db.all():
+        chat_id = grp.get("chat_id")
+        if not chat_id:
+            continue
+
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=(
+                    "📢 𝑮𝒍𝒐𝒃𝒂𝒍 𝑨𝒏𝒏𝒐𝒖𝒏𝒄𝒆𝒎𝒆𝒏𝒕\n\n"
+                    f"{text}"
+                )
+            )
+            sent += 1
+            await asyncio.sleep(0.05)
+
+        except Exception:
+            # REMOVE LEFT / DELETED GROUP
+            groups_db.remove(GroupQ.chat_id == chat_id)
+
+    await msg.reply_text(
+        f"✅ Global Broadcast Completed\n\n"
+        f"📣 Groups Reached: {sent}\n"
+        f"💀 Dead groups auto-removed"
+    )
 
 # -----------------------------
 # Fun commands (open to everyone) — reply_animation with gif URL
