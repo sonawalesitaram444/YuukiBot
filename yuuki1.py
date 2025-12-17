@@ -3716,6 +3716,11 @@ membership_premium_handlers = [
     MessageHandler(filters.PHOTO & filters.ChatType.PRIVATE, handle_private_photo_sessions),
 ]
 
+# ----- Broadcast (Owner Only) -----
+broadcast_handlers = [
+    CommandHandler("dm_anou", dm_anou_cmd),
+    CommandHandler("glo_anou", glo_anou_cmd),
+]
 # ========= MERGE ALL HANDLERS =========
 all_handlers = (
     management_handlers +
@@ -3725,6 +3730,7 @@ all_handlers = (
     fun_handlers +
     bank_handlers +
     admin_handlers +
+    broadcast_handlers +        # ✅ ADDED HERE
     other_handlers +
     membership_premium_handlers
 )
