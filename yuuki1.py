@@ -341,17 +341,6 @@ def stylize_name(name):
     """Optional formatting for display names."""
     return name
 
-@owner_only
-async def test_send(update, context):
-    try:
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text="✅ TEST MESSAGE DELIVERED"
-        )
-        await update.message.reply_text("Sent OK")
-    except Exception as e:
-        await update.message.reply_text(f"ERROR: {e}")
-
 # -------------------- BANK HELPERS --------------------
 def pretty_name_from_rec(rec):
     uname = rec.get("username")
@@ -3209,6 +3198,18 @@ async def message_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # run when messages arrive; text handler checks for awaiting_newpack_name
     if update.message and update.message.text:
         await text_message_handler(update, context)
+
+#testing
+@owner_only
+async def test_send(update, context):
+    try:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="✅ TEST MESSAGE DELIVERED"
+        )
+        await update.message.reply_text("Sent OK")
+    except Exception as e:
+        await update.message.reply_text(f"ERROR: {e}")
  #============================================================
 #                  GROUP MANAGEMENT SYSTEM
 # ============================================================
