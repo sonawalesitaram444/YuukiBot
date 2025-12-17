@@ -31,6 +31,25 @@ banks_table = db["banks"]
 creators_table = db["approved_creators"]
 sessions_table = db["sessions"]
 
+# ensure user
+def ensure_user_record(user):
+    rec = users_table.find_one({"user_id": user.id})
+    if not rec:
+        rec = {
+            "user_id": user.id,
+            "username": getattr(user, "username", None),
+            "display_name": user.first_name,
+            "coins": 0,
+            "inventory": {},
+            "registered": False
+        }
+        users_table.insert_one(rec)
+    return rec
+
+# save user
+def save_user(rec):
+    users_table.update_one({"user_id": rec["user_id"]}, {"$set": rec}, upsert=True)
+
 def admin_only(func):
     @wraps(func)
     async def wrapped(update, context, *args, **kwargs):
