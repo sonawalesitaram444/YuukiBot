@@ -341,6 +341,17 @@ def stylize_name(name):
     """Optional formatting for display names."""
     return name
 
+@owner_only
+async def test_send(update, context):
+    try:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="✅ TEST MESSAGE DELIVERED"
+        )
+        await update.message.reply_text("Sent OK")
+    except Exception as e:
+        await update.message.reply_text(f"ERROR: {e}")
+
 # -------------------- BANK HELPERS --------------------
 def pretty_name_from_rec(rec):
     uname = rec.get("username")
@@ -3727,6 +3738,7 @@ membership_premium_handlers = [
 
 # ----- Broadcast (Owner Only) -----
 broadcast_handlers = [
+    CommandHandler("testsend", test_send),
     CommandHandler("dm_anou", dm_anou_cmd),
     CommandHandler("glo_anou", glo_anou_cmd),
 ]
