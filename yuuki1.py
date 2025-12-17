@@ -3050,75 +3050,80 @@ def owner_only(func):
 # ============================================================
 # 📩 DM ANNOUNCEMENT — /dm_anou
 # ============================================================
+import asyncio
+from telegram.error import Forbidden, BadRequest
+
 @owner_only
-async def dm_anou_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def dm_anou_cmd(update, context):
     msg = update.message
 
-    # Get message text
-    if msg.reply_to_message and msg.reply_to_message.text:
-        text = msg.reply_to_message.text
-    else:
-        text = " ".join(context.args)
-
+    text = msg.reply_to_message.text if msg.reply_to_message else " ".join(context.args)
     if not text:
-        return await msg.reply_text("❌ Usage: /dm_anou <message> or reply to a message")
+        return await msg.reply_text("❌ Usage: /dm_anou <message | reply>")
 
     sent = 0
     failed = 0
 
-    for user in users_table.all():
-        uid = user.get("user_id")
-        if not uid:
-            continue
-
+    for u in users_table.all():
         try:
             await context.bot.send_message(
-                chat_id=uid,
-                text=f"📢 **Yuuki Announcement**\n\n{text}",
+                chat_id=u["user_id"],
+                text=f"📣 *Yuuki Announcement*\n\n{text}",
                 parse_mode="Markdown"
             )
             sent += 1
-        except Exception:
+            await asyncio.sleep(0.6)
+
+        except Forbidden:
             failed += 1
+            users_table.remove(UserQ.user_id == u["user_id"])
+
+        except Exception as e:
+            failed += 1
+            print("DM error:", e)
 
     await msg.reply_text(
-        f"✅ **DM Broadcast Completed**\n\n"
-        f"👤 Users Reached: {sent}\n"
-        f"❌ Failed: {failed}",
-        parse_mode="Markdown"
+        f"✅ DM Broadcast Done\n\n"
+        f"👤 Delivered: {sent}\n"
+        f"❌ Failed removed: {failed}"
     )
 
 # ============================================================
 # 🌍 GLOBAL GROUP ANNOUNCEMENT — /glo_anou
 # ============================================================
 @owner_only
-async def glo_anou_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def glo_anou_cmd(update, context):
     msg = update.message
 
-    if msg.reply_to_message:
-        text = msg.reply_to_message.text
-    else:
-        text = " ".join(context.args)
-
+    text = msg.reply_to_message.text if msg.reply_to_message else " ".join(context.args)
     if not text:
-        return await msg.reply_text("❌ Usage: /glo_anou <message> or reply")
+        return await msg.reply_text("❌ Usage: /glo_anou <message | reply>")
 
     sent = 0
-    dead = 0
+    failed = 0
 
     for g in groups_table.all():
         try:
-            await context.bot.send_message(g["chat_id"], f"📣 **Yuuki Announcement**\n\n{text}")
+            await context.bot.send_message(
+                chat_id=g["chat_id"],
+                text=f"📣 *Yuuki Global Announcement*\n\n{text}",
+                parse_mode="Markdown"
+            )
             sent += 1
-        except Exception:
-            dead += 1
+            await asyncio.sleep(0.7)  # 🔥 VERY IMPORTANT
+
+        except (Forbidden, BadRequest):
+            failed += 1
             groups_table.remove(GroupQ.chat_id == g["chat_id"])
 
+        except Exception as e:
+            failed += 1
+            print("Broadcast error:", e)
+
     await msg.reply_text(
-        f"✅ **Global Broadcast Completed**\n\n"
-        f"📣 Groups Reached: {sent}\n"
-        f"💀 Dead groups auto-removed: {dead}",
-        parse_mode="Markdown"
+        f"✅ Global Broadcast Finished\n\n"
+        f"📣 Delivered: {sent}\n"
+        f"❌ Removed dead groups: {failed}"
     )
 
 # -----------------------------
