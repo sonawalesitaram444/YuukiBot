@@ -21,6 +21,16 @@ from typing import Dict, Any, Optional, Tuple
 from functools import wraps
 from telegram import ChatMember
 
+from pymongo import MongoClient
+MONGO_URI = "mongodb+srv://sonawalesitaram444_db_user:xqAwRv0ZdKMI6dDa@anixgrabber.a2tdbiy.mongodb.net/?appName=anixgrabber"
+client = MongoClient(MONGO_URI)
+db = client["yuuki_db"]
+
+users_table = db["users"]
+banks_table = db["banks"]
+creators_table = db["approved_creators"]
+sessions_table = db["sessions"]
+
 def admin_only(func):
     @wraps(func)
     async def wrapped(update, context, *args, **kwargs):
