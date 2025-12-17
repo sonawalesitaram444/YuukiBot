@@ -894,7 +894,7 @@ async def open_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         pass
     set_group_open(chat.id, True)
-    await update.message.reply_text("✅ Economy is now OPEN in this group.")
+    await update.message.reply_text("Economy is now OPEN in this group.")
 
 async def close_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
@@ -908,9 +908,9 @@ async def close_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         pass
     set_group_open(chat.id, False)
-    await update.message.reply_text("⛔ Economy is now CLOSED in this group to reopen: /open .")
+    await update.message.reply_text("Economy is now CLOSED in this group to reopen: /open .")
 
-# ---------- economy/game commands ----------
+# ---------- daily ----------
 async def daily_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     rec = ensure_user_record(user)
@@ -920,8 +920,9 @@ async def daily_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rec["coins"] += bonus
     rec["last_daily"] = now_ts()
     save_user(rec)
-    await update.message.reply_text(f"🎁 Daily: +{bonus} coins")
+    await update.message.reply_text(f"Daily: +{bonus} coins")
 
+# ---------- balance ----------
 async def bal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     if chat.type != "private" and not check_group_open(chat.id):
@@ -931,122 +932,72 @@ async def bal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         target_user = update.message.reply_to_message.from_user
     rec = ensure_user_record(target_user)
 
-# ---------- balance ----------
-async def bal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat = update.effective_chat
-    if chat.type != "private" and not check_group_open(chat.id):
-        return await update.message.reply_text("⛔ Economy commands are disabled in this group to reopen: /open .")
-
-    target_user = update.effective_user
-    if update.message.reply_to_message:
-        target_user = update.message.reply_to_message.from_user
-
-    rec = ensure_user_record(target_user)
-
     # compute rank excluding bots
-    all_users = [u for u in users_table.all() if not u.get("is_bot", False)]
+    all_users = list(users_col.find({"is_bot": False}))
     sorted_u = sorted(all_users, key=lambda r: r.get("coins", 0), reverse=True)
     rank = next((i+1 for i, r in enumerate(sorted_u) if r["user_id"] == rec["user_id"]), len(sorted_u))
 
-    # just normal name, no clickable link
-    name_line = f"👤 Name: {stylize_name(rec.get('display_name') or rec.get('username') or f'User{rec['user_id']}')}"
-
-    status = "💀 Dead" if rec.get("dead", False) else "❤️ Alive"
+    name_line = f"Name: {stylize_name(rec.get('display_name') or rec.get('username') or f'User{rec['user_id']}')}"
+    status = "Dead" if rec.get("dead", False) else "Alive"
 
     text = (
         f"{name_line}\n"
-        f"💰 Total Balance: {rec.get('coins',0)}\n"
-        f"🏆 Global Rank: {rank}\n"
-        f"❤️ Status: {status}\n"
-        f"⚔️ Kills: {rec.get('kills',0)}"
+        f"Total Balance: {rec.get('coins',0)}\n"
+        f"Global Rank: {rank}\n"
+        f"Status: {status}\n"
+        f"Kills: {rec.get('kills',0)}"
     )
-
     await update.message.reply_text(text)
 
-from telegram import Update
-from telegram.ext import ContextTypes
-
+# ---------- leaderboard helpers ----------
 def format_user_plain(r):
-    """Format user for plain text leaderboard."""
     username = r.get("username")
     display = r.get("display_name") or f"User{r.get('user_id','???')}"
-
-    if username:
-        # Show @username clickable
-        return f"{username}"
-    else:
-        # Show display name if no username
-        return display
+    return username if username else display
 
 # ---------- top 10 richest ----------
 async def toprich_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
-        print("No update.message in toprich_cmd")
         return
     try:
-        all_users = users_table.all()
-        users = [u for u in all_users if not u.get("is_bot", False)]
+        users = list(users_col.find({"is_bot": False}))
         if not users:
-            await update.message.reply_text("No users found.")
-            return
-
+            return await update.message.reply_text("No users found.")
         top = sorted(users, key=lambda r: int(r.get("coins", 0)), reverse=True)[:10]
-        lines = ["🏆 Top 10 Richest"]
-
+        lines = ["Top 10 Richest"]
         for i, r in enumerate(top, start=1):
-            name = format_user_plain(r)
-            coins = int(r.get("coins", 0))
-            lines.append(f"{i}. {name} — {coins} 💰")
-
-        lines.append("\n💡 Set @username to make your name clickable!")
+            lines.append(f"{i}. {format_user_plain(r)} — {int(r.get('coins', 0))} coins")
         await update.message.reply_text("\n".join(lines))
-
     except Exception as e:
-        print("Error in toprich_cmd:", e)
-        await update.message.reply_text("❌ Something went wrong while fetching the top richest list.")
-
+        await update.message.reply_text("Error fetching top richest list.")
 
 # ---------- top 10 killers ----------
 async def topkills_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
-        print("No update.message in topkills_cmd")
         return
     try:
-        all_users = users_table.all()
-        users = [u for u in all_users if not u.get("is_bot", False)]
+        users = list(users_col.find({"is_bot": False}))
         if not users:
-            await update.message.reply_text("No users found.")
-            return
-
+            return await update.message.reply_text("No users found.")
         top = sorted(users, key=lambda r: int(r.get("kills", 0)), reverse=True)[:10]
-        lines = ["🔪 Top 10 Killers"]
-
+        lines = ["Top 10 Killers"]
         for i, r in enumerate(top, start=1):
-            name = format_user_plain(r)
-            kills = int(r.get("kills", 0))
-            lines.append(f"{i}. {name} — {kills} 🔪")
-
-        lines.append("\n💡 Set @username to make your name clickable!")
+            lines.append(f"{i}. {format_user_plain(r)} — {int(r.get('kills', 0))} kills")
         await update.message.reply_text("\n".join(lines))
-
     except Exception as e:
-        print("Error in topkills_cmd:", e)
-        await update.message.reply_text("❌ Something went wrong while fetching the top killers list.")
+        await update.message.reply_text("Error fetching top killers list.")
 
-# give money - reply usage
+# ---------- give ----------
 async def give_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != "private" and not check_group_open(update.effective_chat.id):
-        return await update.message.reply_text("Economy is closed in this group. To reopen: /open.")
+        return await update.message.reply_text("Economy is closed in this group.")
 
-    # Must reply
     if not update.message.reply_to_message:
         return await update.message.reply_text("Reply to the user you want to give coins to.")
 
-    # Self-giving block
     if update.message.reply_to_message.from_user.id == update.effective_user.id:
-        return await update.message.reply_text("You cannot give coins to yourself 💀.")
+        return await update.message.reply_text("You cannot give coins to yourself.")
 
-    # Amount check
     try:
         amt = int(context.args[0])
     except Exception:
@@ -1055,15 +1006,12 @@ async def give_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     giver = ensure_user_record(update.effective_user)
     receiver = ensure_user_record(update.message.reply_to_message.from_user)
 
-    # Bot block
     if receiver.get("is_bot"):
-        return await update.message.reply_text("🤖 Target detected as a bot — action cancelled.")
+        return await update.message.reply_text("Target is a bot — action cancelled.")
 
-    # Balance check
     if giver["coins"] < amt:
-        return await update.message.reply_text("You don't have enough coins.")
+        return await update.message.reply_text("Not enough coins.")
 
-    # Fee logic
     fee = int(amt * GIFT_FEE_RATIO)
     giver["coins"] -= (amt + fee)
     receiver["coins"] += amt
@@ -1071,19 +1019,12 @@ async def give_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_user(giver)
     save_user(receiver)
 
-    gname = stylize_name(giver.get("display_name") or giver.get("username"))
-    rname = stylize_name(receiver.get("display_name") or receiver.get("username"))
+    await update.message.reply_text(f"{stylize_name(giver.get('display_name') or giver.get('username'))} gave {amt} coins to {stylize_name(receiver.get('display_name') or receiver.get('username'))}. Fee: {fee}")
 
-    await update.message.reply_text(
-        f"💸 {gname} gave ${amt} to {rname}!\n"
-        f"Tax fee: ${fee}"
-    )
-
-# ---------- rob command ----------
+# ---------- rob ----------
 async def rob_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat = update.effective_chat
-    if chat.type != "private" and not check_group_open(chat.id):
-        return await update.message.reply_text("⛔ Economy commands are disabled in this group to reopen: /open .")
+    if update.effective_chat.type != "private" and not check_group_open(update.effective_chat.id):
+        return await update.message.reply_text("Economy commands disabled in this group.")
 
     if not update.message.reply_to_message:
         return await update.message.reply_text("Reply to the user you want to rob.")
@@ -1092,46 +1033,30 @@ async def rob_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         amt = int(context.args[0])
     except Exception:
         return await update.message.reply_text("Usage: /rob <amount> (reply)")
-    if amt <= 0:
-        return await update.message.reply_text("❌ Invalid amount.")
 
     thief = ensure_user_record(update.effective_user)
     target = ensure_user_record(update.message.reply_to_message.from_user)
 
     if target.get("is_bot"):
-        return await update.message.reply_text("🤖 Target detected as bot — robbery cancelled.")
+        return await update.message.reply_text("Target is bot — robbery cancelled.")
 
-    # Check protection
     now = now_ts()
     if target.get("protected_until", 0) > now:
-        remaining = int(target["protected_until"] - now)
-        hours = remaining // 3600
-        minutes = (remaining % 3600) // 60
-        return await update.message.reply_text(
-            f"🛡️ {stylize_name(target.get('display_name') or target.get('username'))} is protected, Robbery failed!"
-        )
+        return await update.message.reply_text(f"{stylize_name(target.get('display_name') or target.get('username'))} is protected.")
 
-    if target["coins"] <= 0:
-        return await update.message.reply_text(
-            f"{stylize_name(target.get('display_name') or target.get('username'))} has no coins to be robbed."
-        )
-
-    stolen = min(amt, target["coins"])
+    stolen = min(amt, target.get("coins",0))
     target["coins"] -= stolen
     thief["coins"] += stolen
+
     save_user(target)
     save_user(thief)
 
-    txt = f"💰 {stylize_name(thief.get('display_name') or thief.get('username'))} robbed ${stolen} from {stylize_name(target.get('display_name') or target.get('username'))}!"
-    await update.message.reply_text(txt)
+    await update.message.reply_text(f"{stylize_name(thief.get('display_name') or thief.get('username'))} robbed {stolen} coins from {stylize_name(target.get('display_name') or target.get('username'))}.")
 
-
-# ---------- kill command ----------
+# ---------- kill ----------
 async def kill_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat = update.effective_chat
-
-    if chat.type != "private" and not check_group_open(chat.id):
-        return await update.message.reply_text("⛔ Economy commands are disabled in this group. To reopen: /open.")
+    if update.effective_chat.type != "private" and not check_group_open(update.effective_chat.id):
+        return await update.message.reply_text("Economy commands disabled in this group.")
 
     if not update.message.reply_to_message:
         return await update.message.reply_text("Reply to the user you want to kill.")
@@ -1139,174 +1064,33 @@ async def kill_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     killer = ensure_user_record(update.effective_user)
     victim = ensure_user_record(update.message.reply_to_message.from_user)
 
-    # Auto-revive check
-    victim = check_auto_revive(victim)
     killer = check_auto_revive(killer)
+    victim = check_auto_revive(victim)
 
     if killer.get("dead"):
-        return await update.message.reply_text("💀 dead users can’t kill anyone!")
+        return await update.message.reply_text("Dead users can't kill.")
 
     if victim.get("is_bot"):
-        return await update.message.reply_text("🤖 Cannot kill a bot.")
+        return await update.message.reply_text("Cannot kill bot.")
 
     now = now_ts()
-    if victim.get("protected_until", 0) > now:
-        return await update.message.reply_text("🛡️ That user is protected, kill failed.")
+    if victim.get("protected_until",0) > now:
+        return await update.message.reply_text("Target is protected.")
 
     if victim.get("dead"):
-        return await update.message.reply_text("⚰️ Target is already dead!")
+        return await update.message.reply_text("Target already dead.")
 
-    # reward
     reward = random.randint(KILL_MIN_REWARD, KILL_MAX_REWARD)
     killer["coins"] += reward
-    killer["kills"] = killer.get("kills", 0) + 1
+    killer["kills"] = killer.get("kills",0) + 1
 
-    # kill + 6 hr revive timer
     victim["dead"] = True
     victim["dead_until"] = (datetime.utcnow() + timedelta(hours=6)).timestamp()
 
     save_user(killer)
     save_user(victim)
 
-    txt = (
-        f"💀 {stylize_name(killer.get('display_name') or killer.get('username'))} "
-        f"killed {stylize_name(victim.get('display_name') or victim.get('username'))}!\n"
-        f"💰 Reward: +${reward}\n"
-        f"⏳ They will revive automatically in 6 hours."
-    )
-
-    await update.message.reply_text(txt)
-
-# ---------- revive command ----------
-async def revive_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat = update.effective_chat
-
-    if chat.type != "private" and not check_group_open(chat.id):
-        return await update.message.reply_text("⛔ Economy commands are disabled in this group. To reopen: /open.")
-
-    caller = ensure_user_record(update.effective_user)
-
-    # Check reply target
-    if update.message.reply_to_message:
-        target_user = update.message.reply_to_message.from_user
-    else:
-        target_user = update.effective_user
-
-    target = ensure_user_record(target_user)
-
-    # Auto revive check (important)
-    target = check_auto_revive(target)
-
-    # If already alive
-    if not target.get("dead"):
-        return await update.message.reply_text("Target is already alive.")
-
-    # Not enough coins
-    if caller["coins"] < REVIVE_COST:
-        return await update.message.reply_text(f"💸 You need ${REVIVE_COST} to revive.")
-
-    # Manual revive
-    caller["coins"] -= REVIVE_COST
-    target["dead"] = False
-    target["dead_until"] = None
-    save_user(caller)
-    save_user(target)
-
-    await update.message.reply_text(
-        f"🔁 {stylize_name(target.get('display_name') or target.get('username'))} revived —{REVIVE_COST} coins"
-    )
-
-# ---------- protect command ----------
-async def protect_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat = update.effective_chat
-    if chat.type != "private" and not check_group_open(chat.id):
-        return await update.message.reply_text("⛔ Economy commands are disabled in this group.")
-
-    user = ensure_user_record(update.effective_user)
-    if not context.args:
-        return await update.message.reply_text("Usage: /protect 1d|2d")
-
-    key = context.args[0].lower()
-    if key not in PROTECT_COST:
-        return await update.message.reply_text("Invalid option. Use 1d or 2d.")
-
-    now = now_ts()
-    remaining = user.get("protected_until", 0) - now
-    if remaining > 0:
-        hours = int(remaining // 3600)
-        minutes = int((remaining % 3600) // 60)
-        return await update.message.reply_text(
-            f"🛡️ You are already protected for another {hours}h {minutes}m."
-        )
-
-    cost = PROTECT_COST[key]
-    if user["coins"] < cost:
-        return await update.message.reply_text(f"💸 Not enough coins to buy {key} protection.")
-
-    user["coins"] -= cost
-    days = 1 if key == "1d" else 2
-    user["protected_until"] = now + days * 86400
-    save_user(user)
-
-    await update.message.reply_text(f"✅ Protection purchased for {days} day(s). -{cost} coins")
-
-# revive - if reply -> revive that user, caller pays; if no reply -> revive self (caller pays)
-async def revive_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.type != "private" and not check_group_open(update.effective_chat.id):
-        return await update.message.reply_text("Economy is closed in this group.")
-    caller = ensure_user_record(update.effective_user)
-    target = None
-    if update.message.reply_to_message:
-        target = ensure_user_record(update.message.reply_to_message.from_user)
-    else:
-        target = caller
-    if caller["coins"] < REVIVE_COST:
-        return await update.message.reply_text(f"You need ${REVIVE_COST} to revive.")
-    if not target.get("dead"):
-        return await update.message.reply_text("Target is not dead.")
-    caller["coins"] -= REVIVE_COST
-    target["dead"] = False
-    save_user(caller); save_user(target)
-    await update.message.reply_text(
-        f"🔁 {stylize_name(target.get('display_name') or target.get('username'))} revived -{REVIVE_COST} coins"
-)
-
-# transfer for owner
-@owner_only
-async def transfer_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(context.args) < 3:
-        return await update.message.reply_text("Usage: /transfer <add|remove> <amount> <@user/id>")
-    mode = context.args[0]
-    try:
-        amount = int(context.args[1])
-    except:
-        return await update.message.reply_text("Invalid amount.")
-    target = context.args[2]
-    # get id or @username -> naive: try id first
-    target_id = None
-    if target.startswith("@"):
-        # find in DB
-        rec = users_table.get(UserQ.username == target)
-        if rec:
-            target_id = rec["user_id"]
-    else:
-        try:
-            target_id = int(target)
-        except:
-            pass
-    if not target_id:
-        return await update.message.reply_text("Could not find target user in DB by username or id.")
-    rec = get_user_by_id(target_id)
-    if not rec:
-        return await update.message.reply_text("Target user not found.")
-    if mode == "add":
-        rec["coins"] = rec.get("coins", 0) + amount
-    elif mode == "remove":
-        rec["coins"] = max(0, rec.get("coins", 0) - amount)
-    else:
-        return await update.message.reply_text("Mode must be add or remove.")
-    save_user(rec)
-    await update.message.reply_text(f"✅ Transfer done for {rec.get('username') or rec.get('display_name')}")
+    await update.message.reply_text(f"{stylize_name(killer.get('display_name') or killer.get('username'))} killed {stylize_name(victim.get('display_name') or victim.get('username'))}. Reward: {reward} coins. Victim will revive in 6 hours.")
 
 # ---------- reset single player ----------
 @owner_only
