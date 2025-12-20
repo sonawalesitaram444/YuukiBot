@@ -1637,27 +1637,330 @@ async def gift_or_shift_cmd(update, context):
 
 # END
 
+import random
+from datetime import datetime
+from pymongo import ReturnDocument
 
+# -----------------------------
+# helpers (mongo)
+# -----------------------------
+def ensure_user_record(user):
+    return users_col.find_one_and_update(
+        {"user_id": user.id},
+        {"$setOnInsert": {
+            "user_id": user.id,
+            "username": user.username,
+            "display_name": user.first_name,
+            "coins": 0,
+            "credits": 0,
+            "membership_until": 0,
+            "premium_until": 0,
+            "infinity_until": 0,
+            "claim_available": False,
+            "last_pdaily": 0,
+            "protected_until": 0,
+            "gmute_until": 0,
+            "gmute_uses_date": 0,
+            "gmute_uses_today": 0,
+            "profile_image_file_id": None
+        }},
+        upsert=True,
+        return_document=ReturnDocument.AFTER
+    )
 
-# ============================================================
-#                BROADCAST SYSTEM (0 FAILURE)
-# ============================================================
+def save_user(rec):
+    users_col.update_one(
+        {"user_id": rec["user_id"]},
+        {"$set": rec},
+        upsert=True
+    )
 
-from tinydb import TinyDB, Query
+def now_ts():
+    return int(datetime.utcnow().timestamp())
+
+# -----------------------------
+# /claim (members once, 0–9000)
+# -----------------------------
+async def claim_cmd(update, context):
+    msg = update.message
+    if not msg:
+        return
+    rec = ensure_user_record(msg.from_user)
+    if not is_member(rec):
+        return await msg.reply_text("❌ /claim is for Members only.")
+    if not rec.get("claim_available", False):
+        return await msg.reply_text("❌ You already used /claim for this membership period.")
+
+    amt = random.randint(0, 9000)
+    users_col.update_one(
+        {"user_id": rec["user_id"]},
+        {"$inc": {"coins": amt}, "$set": {"claim_available": False}}
+    )
+    await msg.reply_text(f"🎁 You claimed {amt} coins!")
+
+# -----------------------------
+# /bet <amt> (members only)
+# -----------------------------
+async def bet_cmd(update, context):
+    msg = update.message
+    if not msg:
+        return
+    rec = ensure_user_record(msg.from_user)
+    if not is_member(rec):
+        return await msg.reply_text("❌ /bet is for Members only.")
+    if not context.args:
+        return await msg.reply_text("Usage: /bet <amount>")
+
+    try:
+        amt = int(context.args[0])
+    except:
+        return await msg.reply_text("Invalid amount.")
+
+    if amt <= 0 or rec["coins"] < amt:
+        return await msg.reply_text("Insufficient coins.")
+
+    win = random.choice([True, False])
+    if win:
+        gain = amt * 2
+        users_col.update_one(
+            {"user_id": rec["user_id"]},
+            {"$inc": {"coins": gain}}
+        )
+        await msg.reply_text(f"🎉 You won! You got {gain} coins.")
+    else:
+        users_col.update_one(
+            {"user_id": rec["user_id"]},
+            {"$inc": {"coins": -amt}}
+        )
+        await msg.reply_text(f"💔 You lost {amt} coins.")
+
+# -----------------------------
+# /editname (member/premium)
+# -----------------------------
+async def editname_cmd(update, context):
+    msg = update.message
+    if not msg:
+        return
+    rec = ensure_user_record(msg.from_user)
+    if not is_member(rec) and not is_premium(rec):
+        return await msg.reply_text("❌ /editname is for Members/Premium only.")
+    if not context.args:
+        return await msg.reply_text("Usage: /editname <new name>")
+
+    newname = " ".join(context.args).strip()[:64]
+    users_col.update_one(
+        {"user_id": rec["user_id"]},
+        {"$set": {"display_name": newname}}
+    )
+    await msg.reply_text(f"✅ Display name updated to: {newname}")
+
+# -----------------------------
+# /protect extended
+# -----------------------------
+async def protect_cmd_extended(update, context):
+    msg = update.message
+    if not msg:
+        return
+    rec = ensure_user_record(msg.from_user)
+    if not context.args:
+        return await msg.reply_text("Usage: /protect 1d|2d|3d|4d")
+
+    mapping = {"1d":1,"2d":2,"3d":3,"4d":4}
+    key = context.args[0].lower()
+    if key not in mapping:
+        return await msg.reply_text("Invalid option.")
+
+    days = mapping[key]
+    if not is_member(rec) and days > 2:
+        return await msg.reply_text("Non-members max 2 days.")
+
+    total_cost = days * 200
+    if rec["coins"] < total_cost:
+        return await msg.reply_text("Not enough coins.")
+
+    users_col.update_one(
+        {"user_id": rec["user_id"]},
+        {"$inc": {"coins": -total_cost},
+         "$set": {"protected_until": now_ts() + days * 86400}}
+    )
+    await msg.reply_text(f"✅ Protection active for {days} day(s).")
+
+# -----------------------------
+# /prob (premium)
+# -----------------------------
+async def prob_cmd(update, context):
+    msg = update.message
+    if not msg or not msg.reply_to_message:
+        return await msg.reply_text("Reply to a user.")
+
+    caller = ensure_user_record(msg.from_user)
+    if not is_premium(caller):
+        return await msg.reply_text("❌ Premium only.")
+
+    target = ensure_user_record(msg.reply_to_message.from_user)
+    if target["protected_until"] > now_ts():
+        return await msg.reply_text("Target is protected.")
+
+    take = int(target["coins"] * PROB_TAKE_RATIO)
+    if take <= 0:
+        return await msg.reply_text("Target has no coins.")
+
+    users_col.update_one(
+        {"user_id": target["user_id"]},
+        {"$inc": {"coins": -take}}
+    )
+    users_col.update_one(
+        {"user_id": caller["user_id"]},
+        {"$inc": {"coins": take}}
+    )
+    await msg.reply_text(f"🔱 You took {take} coins.")
+
+# -----------------------------
+# /peditbal (private photo)
+# -----------------------------
+async def peditbal_cmd(update, context):
+    msg = update.message
+    if not msg or msg.chat.type != "private":
+        return
+
+    rec = ensure_user_record(msg.from_user)
+    if not is_member(rec) and not is_premium(rec):
+        return await msg.reply_text("Members/Premium only.")
+
+    sessions_col.update_one(
+        {"user_id": rec["user_id"]},
+        {"$set": {"action": "peditbal"}},
+        upsert=True
+    )
+    await msg.reply_text("Send the image now.")
+
+async def handle_private_photo_sessions(update, context):
+    msg = update.message
+    if not msg or msg.chat.type != "private" or not msg.photo:
+        return
+
+    sess = sessions_col.find_one({"user_id": msg.from_user.id})
+    if not sess or sess.get("action") != "peditbal":
+        return
+
+    users_col.update_one(
+        {"user_id": msg.from_user.id},
+        {"$set": {"profile_image_file_id": msg.photo[-1].file_id}}
+    )
+    sessions_col.delete_one({"user_id": msg.from_user.id})
+    await msg.reply_text("✅ Profile image saved.")
+
+# -----------------------------
+# /gmute (members)
+# -----------------------------
+async def gmute_cmd(update, context):
+    msg = update.message
+    if not msg or not msg.reply_to_message:
+        return
+
+    rec = ensure_user_record(msg.from_user)
+    if not is_member(rec):
+        return await msg.reply_text("Members only.")
+
+    today = int(datetime.utcnow().strftime("%Y%m%d"))
+    if rec["gmute_uses_date"] != today:
+        users_col.update_one(
+            {"user_id": rec["user_id"]},
+            {"$set": {"gmute_uses_date": today, "gmute_uses_today": 0}}
+        )
+        rec["gmute_uses_today"] = 0
+
+    if rec["gmute_uses_today"] >= GMUTE_DAILY_LIMIT:
+        return await msg.reply_text("Daily limit reached.")
+
+    users_col.update_one(
+        {"user_id": msg.reply_to_message.from_user.id},
+        {"$set": {"gmute_until": now_ts() + GMUTE_SECONDS}}
+    )
+    users_col.update_one(
+        {"user_id": rec["user_id"]},
+        {"$inc": {"gmute_uses_today": 1}}
+    )
+    await msg.reply_text("✅ User muted for 5 minutes.")
+
+# -----------------------------
+# /check (premium)
+# -----------------------------
+async def check_cmd(update, context):
+    msg = update.message
+    if not msg or not msg.reply_to_message:
+        return
+
+    rec = ensure_user_record(msg.from_user)
+    if not is_premium(rec):
+        return await msg.reply_text("Premium only.")
+
+    if rec["coins"] < CHECK_COST_COINS:
+        return await msg.reply_text("Not enough coins.")
+
+    users_col.update_one(
+        {"user_id": rec["user_id"]},
+        {"$inc": {"coins": -CHECK_COST_COINS}}
+    )
+
+    target = ensure_user_record(msg.reply_to_message.from_user)
+    await msg.reply_text(
+        f"🔎 Protected until: {format_ts(target['protected_until']) if target['protected_until'] else 'No'}"
+    )
+
+# -----------------------------
+# gift membership / premium
+# -----------------------------
+async def giftmembership_cmd(update, context):
+    msg = update.message
+    if not msg or not msg.reply_to_message:
+        return
+
+    giver = ensure_user_record(msg.from_user)
+    if giver["credits"] < MEMBERSHIP_COST_CREDITS:
+        return await msg.reply_text("Not enough credits.")
+
+    target = ensure_user_record(msg.reply_to_message.from_user)
+    start = max(now_ts(), target["membership_until"])
+
+    users_col.update_one(
+        {"user_id": giver["user_id"]},
+        {"$inc": {"credits": -MEMBERSHIP_COST_CREDITS}}
+    )
+    users_col.update_one(
+        {"user_id": target["user_id"]},
+        {"$set": {"membership_until": start + MEMBERSHIP_DAYS * 86400}}
+    )
+    await msg.reply_text("✅ Membership gifted.")
+
+async def giftpremium_cmd(update, context):
+    msg = update.message
+    if not msg or not msg.reply_to_message:
+        return
+
+    giver = ensure_user_record(msg.from_user)
+    if giver["credits"] < PREMIUM_COST_CREDITS:
+        return await msg.reply_text("Not enough credits.")
+
+    target = ensure_user_record(msg.reply_to_message.from_user)
+    start = max(now_ts(), target["premium_until"])
+
+    users_col.update_one(
+        {"user_id": giver["user_id"]},
+        {"$inc": {"credits": -PREMIUM_COST_CREDITS}}
+    )
+    users_col.update_one(
+        {"user_id": target["user_id"]},
+        {"$set": {"premium_until": start + MEMBERSHIP_DAYS * 86400}}
+    )
+    await msg.reply_text("✅ Premium gifted.")
+
 from telegram import Update
-from telegram.ext import CommandHandler, ContextTypes
-import asyncio
-
-# ---------------- DATABASE ----------------
-users_db = TinyDB("Users.json")
-groups_db = TinyDB("Groups.json")
-
-UserQ = Query()
-GroupQ = Query()
+from telegram.ext import ContextTypes
+import random
 
 # ---------------- OWNER IDS ----------------
 OWNER_IDS = {5773908061}  # add more if needed
-
 
 # ---------------- OWNER CHECK ----------------
 def owner_only(func):
@@ -1667,88 +1970,8 @@ def owner_only(func):
         return await func(update, context)
     return wrapper
 
-
-# ============================================================
-# 📩 DM ANNOUNCEMENT — /dm_anou
-# ============================================================
-import asyncio
-from telegram.error import Forbidden, BadRequest
-
-@owner_only
-async def dm_anou_cmd(update, context):
-    msg = update.message
-
-    text = msg.reply_to_message.text if msg.reply_to_message else " ".join(context.args)
-    if not text:
-        return await msg.reply_text("❌ Usage: /dm_anou <message | reply>")
-
-    sent = 0
-    failed = 0
-
-    for u in users_table.all():
-        try:
-            await context.bot.send_message(
-                chat_id=u["user_id"],
-                text=f"📣 *Yuuki Announcement*\n\n{text}",
-                parse_mode="Markdown"
-            )
-            sent += 1
-            await asyncio.sleep(0.6)
-
-        except Forbidden:
-            failed += 1
-            users_table.remove(UserQ.user_id == u["user_id"])
-
-        except Exception as e:
-            failed += 1
-            print("DM error:", e)
-
-    await msg.reply_text(
-        f"✅ DM Broadcast Done\n\n"
-        f"👤 Delivered: {sent}\n"
-        f"❌ Failed removed: {failed}"
-    )
-
-# ============================================================
-# 🌍 GLOBAL GROUP ANNOUNCEMENT — /glo_anou
-# ============================================================
-@owner_only
-async def glo_anou_cmd(update, context):
-    msg = update.message
-
-    text = msg.reply_to_message.text if msg.reply_to_message else " ".join(context.args)
-    if not text:
-        return await msg.reply_text("❌ Usage: /glo_anou <message | reply>")
-
-    sent = 0
-    failed = 0
-
-    for g in groups_table.all():
-        try:
-            await context.bot.send_message(
-                chat_id=g["chat_id"],
-                text=f"📣 *Yuuki Global Announcement*\n\n{text}",
-                parse_mode="Markdown"
-            )
-            sent += 1
-            await asyncio.sleep(0.7)  # 🔥 VERY IMPORTANT
-
-        except (Forbidden, BadRequest):
-            failed += 1
-            groups_table.remove(GroupQ.chat_id == g["chat_id"])
-
-        except Exception as e:
-            failed += 1
-            print("Broadcast error:", e)
-
-    await msg.reply_text(
-        f"✅ Global Broadcast Finished\n\n"
-        f"📣 Delivered: {sent}\n"
-        f"❌ Removed dead groups: {failed}"
-    )
-
 # -----------------------------
-# Fun commands (open to everyone) — reply_animation with gif URL
+# Fun commands (open to everyone)
 # -----------------------------
 PUNCH_GIFS = ["https://media.tenor.com/jQpYtU3n6nEAAAAC/anime-punch.gif"]
 SLAP_GIFS  = ["https://media.tenor.com/ZQjJz1Kkb04AAAAC/anime-slap.gif"]
@@ -1762,7 +1985,6 @@ async def _fun_send_random_gif(msg, urls):
     try:
         await msg.reply_animation(random.choice(urls))
     except Exception:
-        # fallback to text
         await msg.reply_text("(gif)")
 
 async def punch_cmd(update, context): await _fun_send_random_gif(update.message, PUNCH_GIFS)
@@ -1774,30 +1996,36 @@ async def throw_cmd(update, context): await _fun_send_random_gif(update.message,
 async def rub_cmd(update, context):   await _fun_send_random_gif(update.message, RUB_GIFS)
 
 # -----------------------------
-# Migration helper - safe to run once to add missing fields for all users
+# MongoDB Migration Helper
 # -----------------------------
 def membership_migration():
-    for rec in users_table.all():
-        changed = False
-        defaults = {
-            "credits": 0, "membership_until": 0, "premium_until": 0, "infinity_until": 0,
-            "last_pdaily": 0, "claim_available": False, "free_available": False,
-            "gmute_uses_date": 0, "gmute_uses_today": 0, "gmute_until": 0,
-            "protected_until": 0, "dead": False, "dead_until": 0, "profile_image_file_id": None
-        }
-        for k,v in defaults.items():
-            if k not in rec:
-                rec[k] = v
-                changed = True
-        if changed:
-            users_table.upsert(rec, UserQ.user_id == rec["user_id"])
+    defaults = {
+        "credits": 0,
+        "membership_until": 0,
+        "premium_until": 0,
+        "infinity_until": 0,
+        "last_pdaily": 0,
+        "claim_available": False,
+        "gmute_uses_date": 0,
+        "gmute_uses_today": 0,
+        "gmute_until": 0,
+        "protected_until": 0,
+        "dead": False,
+        "dead_until": 0,
+        "profile_image_file_id": None
+    }
 
-# Optional: Uncomment the following line to run migration at bot start (run once)
+    for key, value in defaults.items():
+        users_col.update_many(
+            {key: {"$exists": False}},
+            {"$set": {key: value}}
+        )
+
+# Run once if needed
 # membership_migration()
 
-# ---------- Callbacks general ----------
+# ---------- Callbacks ----------
 async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # route different callback_data prefixes
     data = update.callback_query.data
     if data.startswith("pickadd:"):
         return await pickadd_callback(update, context)
@@ -1809,18 +2037,17 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------- Misc ----------
 async def ping_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("PONG — Yuuki is awake ⚡️")
+    await update.message.reply_text("PONG — {ping} ⚡️")
 
 async def unknown_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Unknown command. Use /help.")
 
-# ---------- Message router: ensure group state, handle awaited sessions ----------
+# ---------- Message Router ----------
 async def message_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # run when messages arrive; text handler checks for awaiting_newpack_name
     if update.message and update.message.text:
         await text_message_handler(update, context)
 
-#testing
+# ---------- Test ----------
 @owner_only
 async def test_send(update, context):
     try:
