@@ -2663,7 +2663,6 @@ admin_handlers = [
     CommandHandler("approve", approve_cmd),
     CommandHandler("unapprove", unapprove_cmd),
     CommandHandler("approvelist", approvelist_cmd),
-    CommandHandler("wish", wish_cmd),
     CommandHandler("feedback", feedback_cmd),
 ]
 
