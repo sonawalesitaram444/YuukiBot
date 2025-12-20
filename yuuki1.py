@@ -1524,14 +1524,15 @@ async def gift_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # =========================
 # WELCOME NEW MEMBERS
 # =========================
-from telegram import ParseMode
+from telegram import Update
+from telegram.ext import ContextTypes
 
-async def welcome_new_members(update, context):
+async def welcome_new_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for member in update.message.new_chat_members:
         name_mention = member.mention_html()  # clickable name
         await update.message.reply_text(
             f"Welcome {name_mention} 🍙🤗",
-            parse_mode=ParseMode.HTML
+            parse_mode="HTML"  # use string instead of ParseMode
         )
 
 # --------------------------
