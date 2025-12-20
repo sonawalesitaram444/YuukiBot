@@ -2375,7 +2375,6 @@ management_handlers = [
     MessageHandler(filters.Regex(r"^\.unlockchat$"), unlock_cmd),
     MessageHandler(filters.Regex(r"^\.info$"), info_cmd),
     MessageHandler(filters.Regex(r"^\.adminlist$"), adminlist_cmd),
-    CommandHandler("grouphelp", help_group),
 ]
 
 # ----- START + HELP -----
@@ -2481,13 +2480,6 @@ membership_premium_handlers = [
     CommandHandler("rub", rub_cmd),
 
     MessageHandler(filters.PHOTO & filters.ChatType.PRIVATE, handle_private_photo_sessions),
-]
-
-# ----- BROADCAST (OWNER ONLY) -----
-broadcast_handlers = [
-    CommandHandler("testsend", test_send),
-    CommandHandler("dm_anou", dm_anou_cmd),
-    CommandHandler("glo_anou", glo_anou_cmd),
 ]
 
 # ----- OTHER / YUUKI CHAT -----
