@@ -1094,7 +1094,6 @@ async def kill_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # =========================
 # /revive COMMAND
 # =========================
-@admin_only  # Optional: remove if normal users can use
 async def revive_cmd(update, context):
     msg = update.message
     user = msg.from_user
@@ -1136,6 +1135,65 @@ async def revive_cmd(update, context):
         await msg.reply_text(f"You have revived yourself! 💖 Paid ${cost}")
     else:
         await msg.reply_text(f"{target.first_name} has been revived by {user.first_name}! 💖 Paid ${cost}")
+
+import asyncio
+from datetime import datetime, timedelta
+
+# =========================
+# /protect COMMAND
+# =========================
+async def protect_cmd(update, context):
+    msg = update.message
+    user = msg.from_user
+
+    args = context.args
+    if not args or args[0] not in ["1d", "2d"]:
+        await msg.reply_text("Usage: /protect 1d or /protect 2d")
+        return
+
+    duration_str = args[0]
+    cost = 200 if duration_str == "1d" else 400
+    seconds = 24*3600 if duration_str == "1d" else 2*24*3600
+
+    # Get user data
+    player = get_player(user.id)
+    if player is None:
+        await msg.reply_text("You are not registered!")
+        return
+
+    if player.get("protected_until", 0) > datetime.utcnow().timestamp():
+        remaining = int(player["protected_until"] - datetime.utcnow().timestamp())
+        hrs, rem = divmod(remaining, 3600)
+        mins, sec = divmod(rem, 60)
+        await msg.reply_text(f"You are already protected for {hrs}h {mins}m {sec}s")
+        return
+
+    # Check balance
+    if player["balance"] < cost:
+        await msg.reply_text(f"You need ${cost} to protect yourself 💸")
+        return
+
+    # Deduct cost
+    player["balance"] -= cost
+    player["protected_until"] = datetime.utcnow().timestamp() + seconds
+    save_player(user.id, player)
+
+    # Send message with countdown
+    countdown_msg = await msg.reply_text(f"🛡️ Protection activated for {duration_str}! Remaining: {duration_str}")
+
+    # Edit message every second
+    while True:
+        remaining = int(player["protected_until"] - datetime.utcnow().timestamp())
+        if remaining <= 0:
+            await countdown_msg.edit_text("🛡️ Protection expired!")
+            player["protected_until"] = 0
+            save_player(user.id, player)
+            break
+
+        hrs, rem = divmod(remaining, 3600)
+        mins, sec = divmod(rem, 60)
+        await countdown_msg.edit_text(f"🛡️ Protection active! Remaining: {hrs}h {mins}m {sec}s")
+        await asyncio.sleep(1)
 
 import random
 import time
