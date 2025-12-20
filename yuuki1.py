@@ -2677,7 +2677,6 @@ membership_premium_handlers = [
     CommandHandler("bet", bet_cmd),
     CommandHandler("editname", editname_cmd),
     CommandHandler("protect", protect_cmd_extended),
-    CommandHandler("free", free_cmd),
     CommandHandler("gmute", gmute_cmd),
     CommandHandler("prob", prob_cmd),
     CommandHandler("peditbal", peditbal_cmd),
