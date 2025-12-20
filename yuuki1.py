@@ -39,8 +39,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(mes
 logger = logging.getLogger(__name__)
 
 # -------------------- CONFIG --------------------
-BOT_TOKEN = "YOUR_BOT_TOKEN"
-OWNER_IDS = [5773908061, 7139383373]  # add your owner IDs here
+BOT_TOKEN = "8312215148:AAEYp1kZGcWn6pgWSxp8qgA_MR4i9HkfvWo"
+OWNER_IDS = [5773908061]  # add your owner IDs here
 BOT_NAME_DISPLAY = "Yuuki_"
 SUPPORT_LINK = "https://t.me/team_bright_lightX"
 CHANNEL_LINK = "https://t.me/YUUKIUPDATES"
