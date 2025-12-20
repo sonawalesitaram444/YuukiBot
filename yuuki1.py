@@ -1092,18 +1092,16 @@ async def kill_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"{stylize_name(killer.get('display_name') or killer.get('username'))} killed {stylize_name(victim.get('display_name') or victim.get('username'))}. Reward: {reward} coins. Victim will revive in 6 hours.")
 
 # =========================
-# /revive COMMAND
+# /revive COMMAND (MongoDB)
 # =========================
 async def revive_cmd(update, context):
     msg = update.message
     user = msg.from_user
     target = msg.reply_to_message.from_user if msg.reply_to_message else user
 
-    # Assume you have a function get_player(user_id) -> dict with keys: 'alive', 'balance'
-    # And a function save_player(user_id, data) to update player
-    player = get_player(target.id)  # Replace with your actual player getter
-    if player is None:
-        # If player not registered
+    # MongoDB collection: players_col
+    player = players_col.find_one({"user_id": target.id})
+    if not player:
         await msg.reply_text(f"{target.first_name} is not registered in the system ❌")
         return
 
@@ -1117,36 +1115,37 @@ async def revive_cmd(update, context):
     # Cost of revival
     cost = 500
 
-    # Check if user has enough money
-    user_data = get_player(user.id)
-    if user_data["balance"] < cost:
+    # Check user's balance
+    user_data = players_col.find_one({"user_id": user.id})
+    if not user_data or user_data.get("balance", 0) < cost:
         await msg.reply_text("You don't have enough money to revive 💸")
         return
 
-    # Deduct money
-    user_data["balance"] -= cost
-    save_player(user.id, user_data)
+    # Deduct money from the user
+    players_col.update_one(
+        {"user_id": user.id},
+        {"$inc": {"balance": -cost}}
+    )
 
     # Revive the target
-    player["alive"] = True
-    save_player(target.id, player)
+    players_col.update_one(
+        {"user_id": target.id},
+        {"$set": {"alive": True}}
+    )
 
     if target.id == user.id:
-        await msg.reply_text(f"You have revived yourself! 💖 Paid ${cost}")
+        await msg.reply_text(f"💖 You have revived yourself! Paid ${cost}")
     else:
-        await msg.reply_text(f"{target.first_name} has been revived by {user.first_name}! 💖 Paid ${cost}")
-
-import asyncio
-from datetime import datetime, timedelta
+        await msg.reply_text(f"💖 {target.first_name} has been revived by {user.first_name}! Paid ${cost}")
 
 # =========================
-# /protect COMMAND
+# /protect COMMAND (MongoDB)
 # =========================
 async def protect_cmd(update, context):
     msg = update.message
     user = msg.from_user
-
     args = context.args
+
     if not args or args[0] not in ["1d", "2d"]:
         await msg.reply_text("Usage: /protect 1d or /protect 2d")
         return
@@ -1155,45 +1154,90 @@ async def protect_cmd(update, context):
     cost = 200 if duration_str == "1d" else 400
     seconds = 24*3600 if duration_str == "1d" else 2*24*3600
 
-    # Get user data
-    player = get_player(user.id)
-    if player is None:
-        await msg.reply_text("You are not registered!")
+    # MongoDB: players_col
+    player = players_col.find_one({"user_id": user.id})
+    if not player:
+        await msg.reply_text("❌ You are not registered!")
         return
 
-    if player.get("protected_until", 0) > datetime.utcnow().timestamp():
-        remaining = int(player["protected_until"] - datetime.utcnow().timestamp())
+    now_ts = datetime.utcnow().timestamp()
+    if player.get("protected_until", 0) > now_ts:
+        remaining = int(player["protected_until"] - now_ts)
         hrs, rem = divmod(remaining, 3600)
         mins, sec = divmod(rem, 60)
-        await msg.reply_text(f"You are already protected for {hrs}h {mins}m {sec}s")
+        await msg.reply_text(f"⚠️ You are already protected for {hrs}h {mins}m {sec}s")
         return
 
-    # Check balance
-    if player["balance"] < cost:
-        await msg.reply_text(f"You need ${cost} to protect yourself 💸")
+    if player.get("balance", 0) < cost:
+        await msg.reply_text(f"💸 You need ${cost} to protect yourself")
         return
 
-    # Deduct cost
-    player["balance"] -= cost
-    player["protected_until"] = datetime.utcnow().timestamp() + seconds
-    save_player(user.id, player)
+    # Deduct cost and set protection
+    new_protect_until = now_ts + seconds
+    new_balance = player["balance"] - cost
+    players_col.update_one(
+        {"user_id": user.id},
+        {"$set": {"balance": new_balance, "protected_until": new_protect_until}},
+        upsert=True
+    )
 
-    # Send message with countdown
     countdown_msg = await msg.reply_text(f"🛡️ Protection activated for {duration_str}! Remaining: {duration_str}")
 
-    # Edit message every second
+    # Countdown
     while True:
+        player = players_col.find_one({"user_id": user.id})
         remaining = int(player["protected_until"] - datetime.utcnow().timestamp())
         if remaining <= 0:
             await countdown_msg.edit_text("🛡️ Protection expired!")
-            player["protected_until"] = 0
-            save_player(user.id, player)
+            players_col.update_one(
+                {"user_id": user.id},
+                {"$set": {"protected_until": 0}}
+            )
             break
 
         hrs, rem = divmod(remaining, 3600)
         mins, sec = divmod(rem, 60)
         await countdown_msg.edit_text(f"🛡️ Protection active! Remaining: {hrs}h {mins}m {sec}s")
         await asyncio.sleep(1)
+
+# =========================
+# /transfer COMMAND (ADMIN ONLY) - MongoDB
+# =========================
+@admin_only
+async def transfer_cmd(update, context):
+    msg = update.message
+    bot = context.bot
+    chat = msg.chat
+
+    target = msg.reply_to_message.from_user if msg.reply_to_message else None
+    if not target:
+        await msg.reply_text("❌ Reply to a user to transfer money.")
+        return
+
+    args = context.args
+    if not args or not args[0].lstrip("-").isdigit():
+        await msg.reply_text("Usage: /transfer <amount> (can be negative to deduct)")
+        return
+
+    amount = int(args[0])
+
+    # MongoDB: players collection
+    player_data = players_col.find_one({"user_id": target.id})
+    if not player_data:
+        await msg.reply_text(f"{mention(target)} is not registered!")
+        return
+
+    new_balance = player_data.get("balance", 0) + amount
+    players_col.update_one(
+        {"user_id": target.id},
+        {"$set": {"balance": new_balance}},
+        upsert=True
+    )
+
+    if amount >= 0:
+        await msg.reply_text(f"✅ Transferred ${amount} to {mention(target)}")
+    else:
+        await msg.reply_text(f"⚠️ Deducted ${-amount} from {mention(target)}")
 
 import random
 import time
