@@ -505,6 +505,7 @@ from telegram.ext import ContextTypes
 # -----------------------
 # /lottery — owner-only
 # -----------------------
+@owner_only
 async def lottery_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     if not msg:
@@ -572,6 +573,41 @@ async def leavebank_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     banks_table.update_one({"_id": bank["_id"]}, {"$pull": {"members": user.id}})
     await safe_reply(msg, f"👋 You have left the bank *{bank_name}*.", parse_mode="Markdown")
+
+# =========================
+# /bankstatus COMMAND (MongoDB)
+# =========================
+async def bankstatus_cmd(update, context):
+    msg = update.message
+    user = msg.from_user
+
+    # Assume MongoDB collections: players_col, banks_col
+    # players_col document: { "user_id": int, "balance": int, "bank_id": int or None }
+    # banks_col document: { "bank_id": int, "name": str, "owner_id": int, "members": [user_id], "total_deposit": int }
+
+    player = players_col.find_one({"user_id": user.id})
+    if not player or not player.get("bank_id"):
+        await msg.reply_text("❌ You are not in any bank! Join a bank first using /bank")
+        return
+
+    bank = banks_col.find_one({"bank_id": player["bank_id"]})
+    if not bank:
+        await msg.reply_text("❌ Bank not found! Please contact admin.")
+        return
+
+    user_balance = player.get("balance", 0)
+    bank_id = player.get("bank_id")
+    bank_name = bank.get("name", "Unknown Bank")
+
+    text = (
+        f"🏦 **Your Bank Account Info**\n\n"
+        f"🏷️ Bank Name: {bank_name}\n"
+        f"🆔 Bank ID: {bank_id}\n"
+        f"💰 Your Balance in Bank: ${user_balance}\n"
+        f"👥 Total Members: {len(bank.get('members', []))}"
+    )
+
+    await msg.reply_text(text, parse_mode="Markdown")
 
 # -----------------------
 # /all <message>
