@@ -1,4 +1,5 @@
 python-telegram-bot==20.3
-tinydb
+pymongo
+dnspython
 pillow
 requests
