@@ -2657,8 +2657,6 @@ bank_handlers = [
     CommandHandler("leavebank", leavebank_cmd),
     CommandHandler("deletebank", deletebank_cmd),
 
-    CallbackQueryHandler(callback_bank_join, pattern=r"^bank_join"),
-    CallbackQueryHandler(callback_bank_join_no, pattern=r"^bank_join_no"),
     CallbackQueryHandler(callback_leavebank_yes, pattern=r"^leavebank_yes"),
     CallbackQueryHandler(callback_leavebank_no, pattern=r"^leavebank_no"),
     CallbackQueryHandler(callback_deletebank_yes, pattern=r"^deletebank_yes"),
