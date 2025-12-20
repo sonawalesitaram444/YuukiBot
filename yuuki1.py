@@ -2380,9 +2380,7 @@ management_handlers = [
 # ----- START + HELP -----
 start_help_handlers = [
     CommandHandler("start", start_cmd),
-    CallbackQueryHandler(menu_callback, pattern=r"^menu:"),
 ]
-
 # ----- ECONOMY -----
 economy_handlers = [
     CommandHandler("open", open_cmd),
