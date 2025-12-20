@@ -1091,6 +1091,52 @@ async def kill_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(f"{stylize_name(killer.get('display_name') or killer.get('username'))} killed {stylize_name(victim.get('display_name') or victim.get('username'))}. Reward: {reward} coins. Victim will revive in 6 hours.")
 
+# =========================
+# /revive COMMAND
+# =========================
+@admin_only  # Optional: remove if normal users can use
+async def revive_cmd(update, context):
+    msg = update.message
+    user = msg.from_user
+    target = msg.reply_to_message.from_user if msg.reply_to_message else user
+
+    # Assume you have a function get_player(user_id) -> dict with keys: 'alive', 'balance'
+    # And a function save_player(user_id, data) to update player
+    player = get_player(target.id)  # Replace with your actual player getter
+    if player is None:
+        # If player not registered
+        await msg.reply_text(f"{target.first_name} is not registered in the system ❌")
+        return
+
+    if player.get("alive", True):
+        if target.id == user.id:
+            await msg.reply_text("You are already alive! ✅")
+        else:
+            await msg.reply_text(f"{target.first_name} is already alive! ✅")
+        return
+
+    # Cost of revival
+    cost = 500
+
+    # Check if user has enough money
+    user_data = get_player(user.id)
+    if user_data["balance"] < cost:
+        await msg.reply_text("You don't have enough money to revive 💸")
+        return
+
+    # Deduct money
+    user_data["balance"] -= cost
+    save_player(user.id, user_data)
+
+    # Revive the target
+    player["alive"] = True
+    save_player(target.id, player)
+
+    if target.id == user.id:
+        await msg.reply_text(f"You have revived yourself! 💖 Paid ${cost}")
+    else:
+        await msg.reply_text(f"{target.first_name} has been revived by {user.first_name}! 💖 Paid ${cost}")
+
 import random
 import time
 from datetime import datetime, timedelta
