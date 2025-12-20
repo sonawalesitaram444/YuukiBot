@@ -2656,12 +2656,6 @@ bank_handlers = [
     CommandHandler("getloan", getloan_cmd),
     CommandHandler("leavebank", leavebank_cmd),
     CommandHandler("deletebank", deletebank_cmd),
-
-    CallbackQueryHandler(callback_leavebank_yes, pattern=r"^leavebank_yes"),
-    CallbackQueryHandler(callback_leavebank_no, pattern=r"^leavebank_no"),
-    CallbackQueryHandler(callback_deletebank_yes, pattern=r"^deletebank_yes"),
-    CallbackQueryHandler(callback_deletebank_no, pattern=r"^deletebank_no"),
-    CallbackQueryHandler(callback_budget_set, pattern=r"^budget_set"),
 ]
 
 # ----- ADMIN -----
