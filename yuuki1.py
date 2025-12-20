@@ -2368,29 +2368,13 @@ def list_approved_users():
 
 # ========= CREATE BOT =========
 app = ApplicationBuilder().token(BOT_TOKEN).build()
-# ----------------------------------
 
 # ========= REGISTER HANDLERS =========
 
-async def skip_old_updates(app):
-    print("Skipping old updates...")
-    try:
-        updates = await app.bot.get_updates(offset=-1)
-        print(f"Skipped {len(updates)} old updates.")
-    except Exception as e:
-        print("Error skipping updates:", e)
+# ----- SAVE GROUP (MUST BE FIRST) -----
+app.add_handler(MessageHandler(filters.ChatType.GROUPS, save_group), group=0)
 
-other_handlers = [
-    MessageHandler(filters.ChatType.GROUPS, save_group),  # ✅ MUST BE FIRST
-
-    MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_members),
-    MessageHandler(filters.PHOTO & filters.ChatType.PRIVATE, handle_photos_for_banks),
-    MessageHandler(filters.TEXT & ~filters.COMMAND, yuuki_chat),
-    MessageHandler(filters.Sticker.ALL, yuuki_chat),
-    MessageHandler(filters.TEXT & ~filters.COMMAND, message_router),
-]
-
-# ----- Management -----
+# ----- MANAGEMENT -----
 management_handlers = [
     MessageHandler(filters.Regex(r"^\.promote(\s[1-3])?$"), promote_cmd),
     MessageHandler(filters.Regex(r"^\.demote$"), demote_cmd),
@@ -2413,7 +2397,7 @@ start_help_handlers = [
     CallbackQueryHandler(menu_callback, pattern=r"^menu:"),
 ]
 
-# ----- Economy -----
+# ----- ECONOMY -----
 economy_handlers = [
     CommandHandler("open", open_cmd),
     CommandHandler("close", close_cmd),
@@ -2433,7 +2417,7 @@ economy_handlers = [
     CommandHandler("all", all_cmd),
 ]
 
-# ----- Shop -----
+# ----- SHOP -----
 shop_handlers = [
     CommandHandler("register", register_cmd),
     CommandHandler("shop", shop_cmd),
@@ -2442,7 +2426,7 @@ shop_handlers = [
     CommandHandler("buy", buy_cmd),
 ]
 
-# ----- Fun -----
+# ----- FUN -----
 fun_handlers = [
     CommandHandler("punch", punch_cmd),
     CommandHandler("slap", slap_cmd),
@@ -2451,10 +2435,8 @@ fun_handlers = [
     CommandHandler("ping", ping_cmd),
 ]
 
-# ----- Banking -----
+# ----- BANKING -----
 bank_handlers = [
-
-    # Commands
     CommandHandler("createbank", createbank_cmd),
     CommandHandler("banklist", banklist_cmd),
     CommandHandler("addbank", addbank_cmd),
@@ -2467,20 +2449,16 @@ bank_handlers = [
     CommandHandler("leavebank", leavebank_cmd),
     CommandHandler("deletebank", deletebank_cmd),
 
-    # Callbacks
     CallbackQueryHandler(callback_bank_join, pattern=r"^bank_join"),
     CallbackQueryHandler(callback_bank_join_no, pattern=r"^bank_join_no"),
-
     CallbackQueryHandler(callback_leavebank_yes, pattern=r"^leavebank_yes"),
     CallbackQueryHandler(callback_leavebank_no, pattern=r"^leavebank_no"),
-
     CallbackQueryHandler(callback_deletebank_yes, pattern=r"^deletebank_yes"),
     CallbackQueryHandler(callback_deletebank_no, pattern=r"^deletebank_no"),
-
     CallbackQueryHandler(callback_budget_set, pattern=r"^budget_set"),
 ]
 
-# ----- Admin -----
+# ----- ADMIN -----
 admin_handlers = [
     CommandHandler("approve", approve_cmd),
     CommandHandler("unapprove", unapprove_cmd),
@@ -2489,25 +2467,11 @@ admin_handlers = [
     CommandHandler("feedback", feedback_cmd),
 ]
 
-# ----- Other -----
-other_handlers = [
-    MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_members),
-    MessageHandler(filters.PHOTO & filters.ChatType.PRIVATE, handle_photos_for_banks),
-
-    # Yuuki chat handlers
-    MessageHandler(filters.TEXT & ~filters.COMMAND, yuuki_chat),
-    MessageHandler(filters.Sticker.ALL, yuuki_chat),  # ✅ fixed
-
-    # Keep your message_router if you want fallback handling
-    MessageHandler(filters.TEXT & ~filters.COMMAND, message_router),
-]
-
-# ----- Membership / Premium / Infinity Handlers -----
+# ----- MEMBERSHIP / PREMIUM / INFINITY -----
 membership_premium_handlers = [
     CommandHandler("credits", credits_cmd),
     CommandHandler("buycredit", buycredit_cmd),
     CommandHandler("creditshop", creditshop_cmd),
-    CommandHandler("buy", buy_cmd),
 
     CommandHandler("pdaily", pdaily_cmd),
     CommandHandler("claim", claim_cmd),
@@ -2524,27 +2488,35 @@ membership_premium_handlers = [
     CommandHandler("giftmembership", giftmembership_cmd),
     CommandHandler("giftpremium", giftpremium_cmd),
 
-    # Fun commands usable by everyone
-    CommandHandler("punch", punch_cmd),
-    CommandHandler("slap", slap_cmd),
-    CommandHandler("hug", hug_cmd),
-    CommandHandler("kiss", kiss_cmd),
     CommandHandler("bonk", bonk_cmd),
     CommandHandler("throw", throw_cmd),
     CommandHandler("rub", rub_cmd),
 
-    # Photo handler for premium image upload
     MessageHandler(filters.PHOTO & filters.ChatType.PRIVATE, handle_private_photo_sessions),
 ]
 
-# ----- Broadcast (Owner Only) -----
+# ----- BROADCAST (OWNER ONLY) -----
 broadcast_handlers = [
     CommandHandler("testsend", test_send),
     CommandHandler("dm_anou", dm_anou_cmd),
     CommandHandler("glo_anou", glo_anou_cmd),
 ]
-# ========= MERGE ALL HANDLERS =========
-all_handlers = (
+
+# ----- OTHER / YUUKI CHAT -----
+other_handlers = [
+    MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_members),
+    MessageHandler(filters.PHOTO & filters.ChatType.PRIVATE, handle_photos_for_banks),
+
+    # Yuuki talking system
+    MessageHandler(filters.TEXT & ~filters.COMMAND, yuuki_chat),
+    MessageHandler(filters.Sticker.ALL, yuuki_chat),
+
+    # fallback
+    MessageHandler(filters.TEXT & ~filters.COMMAND, message_router),
+]
+
+# ========= ADD ALL HANDLERS =========
+for handler in (
     management_handlers +
     start_help_handlers +
     economy_handlers +
@@ -2552,14 +2524,11 @@ all_handlers = (
     fun_handlers +
     bank_handlers +
     admin_handlers +
-    broadcast_handlers +        # ✅ ADDED HERE
-    other_handlers +
-    membership_premium_handlers
-)
-
-# ========= ADD HANDLERS =========
-for handler in all_handlers:
+    membership_premium_handlers +
+    broadcast_handlers +
+    other_handlers
+):
     app.add_handler(handler)
 
-print("Yuuki_ is running now!!")
+print("Yuuki_ is running now!! 🚀")
 app.run_polling(drop_pending_updates=True)
