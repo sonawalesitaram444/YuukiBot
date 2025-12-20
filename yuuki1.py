@@ -2653,7 +2653,6 @@ bank_handlers = [
     CommandHandler("withdraw", withdraw_cmd),
     CommandHandler("bank", bank_cmd),
     CommandHandler("bankstatus", bankstatus_cmd),
-    CommandHandler("budget", budget_cmd),
     CommandHandler("getloan", getloan_cmd),
     CommandHandler("leavebank", leavebank_cmd),
     CommandHandler("deletebank", deletebank_cmd),
