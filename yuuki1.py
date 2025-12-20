@@ -1756,6 +1756,18 @@ async def buycredit_cmd(update, context):
     )
     await update.message.reply_text(f"✅ Bought {n} credits")
 
+# =========================
+# /creditshop COMMAND
+# =========================
+async def creditshop_cmd(update, context):
+    text = (
+        "🛒 **Credits Shop** 🛒\n\n"
+        "1 credit = 1,000,000 $\n"
+        "2 credits = 2,000,000 $\n\n"
+        "💡 Usage: `/buycredit <amount>`"
+    )
+    await update.message.reply_text(text, parse_mode="Markdown")
+
 # -------- /pbuy --------
 async def pbuy_cmd(update, context):
     u = ensure_user(update.message.from_user)
