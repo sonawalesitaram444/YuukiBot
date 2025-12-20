@@ -1328,15 +1328,6 @@ INFINITY_BOOST = 0.30           # 30% boost (stats/effects)
 INFINITY_REVIVE_REDUCE_HOURS = 5
 INFINITY_GRACE_REVIVE_SECONDS = 3600  # if you die, you'll auto-revive within 1 hour (logic described)
 
-# TinyDB Query object — try to reuse existing
-try:
-    Query  # if Query is already imported
-except NameError:
-    from tinydb import Query
-    Query = Query
-
-UserQ = Query()
-
 # -------------------------
 # ensure/save helpers (safe: wont overwrite existing)
 # -------------------------
