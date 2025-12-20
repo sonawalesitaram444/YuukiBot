@@ -22,7 +22,6 @@ from io import BytesIO
 
 import requests
 from pymongo import MongoClient
-from tinydb import TinyDB, Query
 from PIL import Image, ImageDraw, ImageFont
 from telegram import (
     Update, ChatMember, ChatAdministratorRights,
