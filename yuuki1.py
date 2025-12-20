@@ -1521,6 +1521,19 @@ async def gift_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("🎁 Gift sent")
 
+# =========================
+# WELCOME NEW MEMBERS
+# =========================
+from telegram import ParseMode
+
+async def welcome_new_members(update, context):
+    for member in update.message.new_chat_members:
+        name_mention = member.mention_html()  # clickable name
+        await update.message.reply_text(
+            f"Welcome {name_mention} 🍙🤗",
+            parse_mode=ParseMode.HTML
+        )
+
 # --------------------------
 # Membership / Premium / Infinity System + Fun commands
 # Paste AFTER your DB & users_table & sessions_table are defined.
@@ -2707,7 +2720,7 @@ membership_premium_handlers = [
 
 # ----- OTHER / YUUKI CHAT -----
 other_handlers = [
-    MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_members),
+   MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_members),
     MessageHandler(filters.PHOTO & filters.ChatType.PRIVATE, handle_photos_for_banks),
 
     # Yuuki talking system
