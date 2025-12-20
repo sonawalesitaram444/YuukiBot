@@ -1446,432 +1446,198 @@ def check_auto_revive(rec):
             save_user(rec)
     return rec
 
-# -------------------------
-# Small helper to apply Infinity effects at kill-time
-# CALL this from your kill logic after you set victim["dead"] = True and victim["dead_until"].
-# It will:
-#  - shorten dead_until by INFINITY_REVIVE_REDUCE_HOURS if victim has infinity
-#  - if victim has infinity, ensure they will auto-revive within 1 hour (set dead_until accordingly)
-#  - apply boost bookkeeping if needed
-# -------------------------
-def apply_infinity_effects_on_kill(killer_rec, victim_rec):
-    """Call right after your kill sets victim dead state. This adjusts dead_until and optionally
-       prevents reward if you requested (we do not change killer reward here)."""
-    now = now_ts()
-    if not victim_rec:
-        return
-    # If victim has infinity active, reduce revive time
-    if is_infinity(victim_rec):
-        # If victim.dead_until exists, reduce it by INFINITY_REVIVE_REDUCE_HOURS
-        if victim_rec.get("dead_until", 0):
-            reduced = victim_rec["dead_until"] - INFINITY_REVIVE_REDUCE_HOURS * 3600
-            # But ensure they will revive no later than now + grace (1 hour)
-            max_auto = now + INFINITY_GRACE_REVIVE_SECONDS
-            victim_rec["dead_until"] = min(max_auto, max(reduced, now + 1))
-        else:
-            # if not set, set to now + 1 hour to allow quick auto revive
-            victim_rec["dead_until"] = now + INFINITY_GRACE_REVIVE_SECONDS
-        save_user(victim_rec)
+# ===============================
+# MEMBERSHIP / PREMIUM / INFINITY
+# MongoDB Version (FULL)
+# ===============================
 
-# -----------------------------
-# /credits - shows coins & credits & status
-# -----------------------------
+from datetime import datetime
+import random, time
+from pymongo import ReturnDocument
+
+# -------- CONSTANTS --------
+CREDIT_COST_COINS = 1_000_000
+
+MEMBERSHIP_COST_CREDITS = 1
+PREMIUM_COST_CREDITS = 5
+INFINITY_COST_CREDITS = 2
+MEMBERSHIP_DAYS = 30
+
+PDAYLY_REWARD_MEMBER = 5000
+PDAYLY_REWARD_PREMIUM = 10000
+
+GMUTE_SECONDS = 300
+GMUTE_DAILY_LIMIT = 2
+CHECK_COST_COINS = 5000
+FREE_PERCENT = 0.20
+PROB_TAKE_RATIO = 0.30
+
+INFINITY_REVIVE_REDUCE_HOURS = 5
+INFINITY_GRACE_REVIVE_SECONDS = 3600
+
+# -------- HELPERS --------
+def now_ts():
+    return int(time.time())
+
+def ensure_user(user):
+    return users_col.find_one_and_update(
+        {"user_id": user.id},
+        {"$setOnInsert": {
+            "user_id": user.id,
+            "username": user.username,
+            "display_name": user.first_name,
+            "coins": 0,
+            "credits": 0,
+            "membership_until": 0,
+            "premium_until": 0,
+            "infinity_until": 0,
+            "last_pdaily": 0,
+            "claim_available": False,
+            "free_available": False,
+            "gmute_uses_date": 0,
+            "gmute_uses_today": 0,
+            "gmute_until": 0,
+            "protected_until": 0,
+            "dead": False,
+            "dead_until": 0,
+            "profile_image_file_id": None,
+        }},
+        upsert=True,
+        return_document=ReturnDocument.AFTER
+    )
+
+def is_member(u): return u["membership_until"] > now_ts()
+def is_premium(u): return u["premium_until"] > now_ts()
+def is_infinity(u): return u["infinity_until"] > now_ts()
+
+def fmt(ts):
+    return datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d %H:%M UTC") if ts else "No"
+
+# -------- /credits --------
 async def credits_cmd(update, context):
-    msg = update.message
-    if not msg:
-        return
-    rec = ensure_user_record(msg.from_user)
-    await msg.reply_text(
-        f"💳 Credits: {rec.get('credits',0)}\n"
-        f"💰 Coins: {rec.get('coins',0)}\n"
-        f"👑 Membership: {format_ts(rec.get('membership_until',0)) if is_member(rec) else 'No'}\n"
-        f"💎 Premium: {format_ts(rec.get('premium_until',0)) if is_premium(rec) else 'No'}\n"
-        f"♾️ Infinity: {format_ts(rec.get('infinity_until',0)) if is_infinity(rec) else 'No'}"
+    u = ensure_user(update.message.from_user)
+    await update.message.reply_text(
+        f"💳 Credits: {u['credits']}\n"
+        f"💰 Coins: {u['coins']}\n"
+        f"👑 Membership: {fmt(u['membership_until']) if is_member(u) else 'No'}\n"
+        f"💎 Premium: {fmt(u['premium_until']) if is_premium(u) else 'No'}\n"
+        f"♾ Infinity: {fmt(u['infinity_until']) if is_infinity(u) else 'No'}"
     )
 
-# -----------------------------
-# /buycredit <n>
-# -----------------------------
+# -------- /buycredit --------
 async def buycredit_cmd(update, context):
-    msg = update.message
-    if not msg:
-        return
-    rec = ensure_user_record(msg.from_user)
+    u = ensure_user(update.message.from_user)
     if not context.args:
-        return await msg.reply_text(f"Usage: /buycredit <amount>\n1 credit = {CREDIT_COST_COINS} coins.")
-    try:
-        n = int(context.args[0])
-        if n <= 0:
-            raise ValueError()
-    except:
-        return await msg.reply_text("Invalid number.")
+        return await update.message.reply_text("Usage: /buycredit <amount>")
+
+    n = int(context.args[0])
     cost = n * CREDIT_COST_COINS
-    if rec.get("coins",0) < cost:
-        return await msg.reply_text(f"💸 Not enough coins. Need {cost} coins to buy {n} credits.")
-    rec["coins"] -= cost
-    rec["credits"] = rec.get("credits",0) + n
-    save_user(rec)
-    await msg.reply_text(f"✅ Purchased {n} credits for {cost} coins. You now have {rec['credits']} credits.")
+    if u["coins"] < cost:
+        return await update.message.reply_text("Not enough coins")
 
-# -----------------------------
-# /creditshop
-# -----------------------------
-async def creditshop_cmd(update, context):
-    msg = update.message
-    if not msg:
-        return
-    text = (
-        "🛒 *Credit Shop*\n\n"
-        f"• Membership (30 days) — {MEMBERSHIP_COST_CREDITS} credit\n"
-        f"• Premium (30 days) — {PREMIUM_COST_CREDITS} credits\n"
-        f"• Infinity (30 days effect) — {INFINITY_COST_CREDITS} credits\n\n"
-        "Commands:\n"
-        "/buy membership\n"
-        "/buy premium\n"
-        "/buy infinity\n"
-        "/buycredit <n>\n"
+    users_col.update_one(
+        {"user_id": u["user_id"]},
+        {"$inc": {"coins": -cost, "credits": n}}
     )
-    await msg.reply_text(text, parse_mode="Markdown")
+    await update.message.reply_text(f"✅ Bought {n} credits")
 
-# -----------------------------
-# /buy membership | premium | infinity
-# -----------------------------
-async def buy_cmd(update, context):
-    msg = update.message
-    if not msg:
-        return
-    rec = ensure_user_record(msg.from_user)
+# -------- /pbuy --------
+async def pbuy_cmd(update, context):
+    u = ensure_user(update.message.from_user)
     if not context.args:
-        return await msg.reply_text("Usage: /buy membership|premium|infinity")
-    opt = context.args[0].lower()
+        return
 
+    item = context.args[0].lower()
     now = now_ts()
-    if opt == "membership":
-        if rec.get("credits",0) < MEMBERSHIP_COST_CREDITS:
-            return await msg.reply_text("❌ Not enough credits for membership.")
-        rec["credits"] -= MEMBERSHIP_COST_CREDITS
-        start = max(now, rec.get("membership_until",0))
-        rec["membership_until"] = start + MEMBERSHIP_DAYS * 86400
-        reset_member_one_time_flags_on_buy(rec)
-        save_user(rec)
-        return await msg.reply_text(f"✅ Membership purchased until {format_ts(rec['membership_until'])}. Use /pdaily for members reward.")
-    elif opt == "premium":
-        if rec.get("credits",0) < PREMIUM_COST_CREDITS:
-            return await msg.reply_text("❌ Not enough credits for premium.")
-        rec["credits"] -= PREMIUM_COST_CREDITS
-        start = max(now, rec.get("premium_until",0))
-        rec["premium_until"] = start + MEMBERSHIP_DAYS * 86400
-        save_user(rec)
-        return await msg.reply_text(f"💎 Premium purchased until {format_ts(rec['premium_until'])}.")
-    elif opt == "infinity":
-        if rec.get("credits",0) < INFINITY_COST_CREDITS:
-            return await msg.reply_text("❌ Not enough credits for infinity.")
-        rec["credits"] -= INFINITY_COST_CREDITS
-        start = max(now, rec.get("infinity_until",0))
-        rec["infinity_until"] = start + MEMBERSHIP_DAYS * 86400
-        # record purchase time
-        rec["last_infinity"] = now
-        save_user(rec)
-        await msg.reply_text(
-            "♾️ Infinity purchased! Your stats are increased by 30% and revive time reductions applied.\n"
-            "After you die, you will be eligible for an automatic revive (special grace) for 1 hour.\n"
-            f"Active until {format_ts(rec['infinity_until'])}."
+
+    if item == "membership" and u["credits"] >= MEMBERSHIP_COST_CREDITS:
+        users_col.update_one(
+            {"user_id": u["user_id"]},
+            {"$inc": {"credits": -MEMBERSHIP_COST_CREDITS},
+             "$set": {
+                "membership_until": max(now, u["membership_until"]) + MEMBERSHIP_DAYS*86400,
+                "claim_available": True,
+                "free_available": True
+             }}
         )
-    else:
-        return await msg.reply_text("Unknown item. Use /creditshop to see items.")
+        return await update.message.reply_text("👑 Membership activated")
 
-# -----------------------------
-# /pdaily (member=5k, premium=10k)
-# -----------------------------
+    if item == "premium" and u["credits"] >= PREMIUM_COST_CREDITS:
+        users_col.update_one(
+            {"user_id": u["user_id"]},
+            {"$inc": {"credits": -PREMIUM_COST_CREDITS},
+             "$set": {
+                "premium_until": max(now, u["premium_until"]) + MEMBERSHIP_DAYS*86400
+             }}
+        )
+        return await update.message.reply_text("💎 Premium activated")
+
+    if item == "infinity" and u["credits"] >= INFINITY_COST_CREDITS:
+        users_col.update_one(
+            {"user_id": u["user_id"]},
+            {"$inc": {"credits": -INFINITY_COST_CREDITS},
+             "$set": {
+                "infinity_until": max(now, u["infinity_until"]) + MEMBERSHIP_DAYS*86400
+             }}
+        )
+        return await update.message.reply_text("♾ Infinity activated")
+
+    await update.message.reply_text("❌ Not enough credits")
+
+# -------- /pdaily --------
 async def pdaily_cmd(update, context):
-    msg = update.message
-    if not msg:
-        return
-    rec = ensure_user_record(msg.from_user)
+    u = ensure_user(update.message.from_user)
     now = now_ts()
-    if now - rec.get("last_pdaily",0) < 24*3600:
-        remaining = 24*3600 - (now - rec.get("last_pdaily",0))
-        hours = remaining//3600
-        minutes = (remaining%3600)//60
-        return await msg.reply_text(f"⏳ Already claimed. Try again in {hours}h {minutes}m.")
-    # premium -> 10k, member -> 5k, else -> not allowed
-    if is_premium(rec):
-        amount = PDAYLY_REWARD_PREMIUM
-    elif is_member(rec):
-        amount = PDAYLY_REWARD_MEMBER
-    else:
-        return await msg.reply_text("❌ /pdaily is for Members or Premium only. Use /buy membership or /buy premium.")
-    rec["coins"] = rec.get("coins",0) + amount
-    rec["last_pdaily"] = now
-    save_user(rec)
-    await msg.reply_text(f"✅ You received {amount} coins.")
 
-# -----------------------------
-# /claim (members once, 0-9000)
-# -----------------------------
-async def claim_cmd(update, context):
-    msg = update.message
-    if not msg:
+    if now - u["last_pdaily"] < 86400:
+        return await update.message.reply_text("⏳ Already claimed")
+
+    if is_premium(u): amt = PDAYLY_REWARD_PREMIUM
+    elif is_member(u): amt = PDAYLY_REWARD_MEMBER
+    else: return
+
+    users_col.update_one(
+        {"user_id": u["user_id"]},
+        {"$inc": {"coins": amt}, "$set": {"last_pdaily": now}}
+    )
+    await update.message.reply_text(f"+{amt} coins")
+
+# -------- /gift & /shift --------
+async def gift_or_shift_cmd(update, context):
+    giver = ensure_user(update.message.from_user)
+    if not update.message.reply_to_message or not context.args:
         return
-    rec = ensure_user_record(msg.from_user)
-    if not is_member(rec):
-        return await msg.reply_text("❌ /claim is for Members only.")
-    if not rec.get("claim_available", False):
-        return await msg.reply_text("❌ You already used /claim for this membership period.")
-    amt = random.randint(0,9000)
-    rec["coins"] = rec.get("coins",0) + amt
-    rec["claim_available"] = False
-    save_user(rec)
-    await msg.reply_text(f"🎁 You claimed {amt} coins!")
 
-# -----------------------------
-# /bet <amt> (members only)  -- unchanged behaviour (50/50 *2)
-# -----------------------------
-async def bet_cmd(update, context):
-    msg = update.message
-    if not msg: return
-    rec = ensure_user_record(msg.from_user)
-    if not is_member(rec):
-        return await msg.reply_text("❌ /bet is for Members only.")
-    if not context.args:
-        return await msg.reply_text("Usage: /bet <amount>")
-    try:
-        amt = int(context.args[0])
-    except:
-        return await msg.reply_text("Invalid amount.")
-    if amt<=0 or rec.get("coins",0) < amt:
-        return await msg.reply_text("Insufficient coins.")
-    rec["coins"] -= amt
-    win = random.choice([True, False])
-    if win:
-        gain = amt * 2
-        rec["coins"] += gain
-        save_user(rec)
-        await msg.reply_text(f"🎉 You won! You got {gain} coins.")
-    else:
-        save_user(rec)
-        await msg.reply_text(f"💔 You lost {amt} coins. Better luck next time.")
+    target = ensure_user(update.message.reply_to_message.from_user)
+    item = context.args[0].lower()
+    now = now_ts()
 
-# -----------------------------
-# /editname <text> (members only)
-# -----------------------------
-async def editname_cmd(update, context):
-    msg = update.message
-    if not msg: return
-    rec = ensure_user_record(msg.from_user)
-    if not is_member(rec) and not is_premium(rec):
-        return await msg.reply_text("❌ /editname is for Members/Premium only.")
-    if not context.args:
-        return await msg.reply_text("Usage: /editname <new display name>")
-    newname = " ".join(context.args).strip()
-    rec["display_name"] = newname[:64]
-    save_user(rec)
-    await msg.reply_text(f"✅ Display name updated to: {rec['display_name']}")
+    cost_map = {
+        "membership": MEMBERSHIP_COST_CREDITS,
+        "premium": PREMIUM_COST_CREDITS,
+        "infinity": INFINITY_COST_CREDITS
+    }
 
-# -----------------------------
-# /protect extended (1-4d; non-member up to 2d)
-# -----------------------------
-async def protect_cmd_extended(update, context):
-    msg = update.message
-    if not msg:
-        return
-    rec = ensure_user_record(msg.from_user)
-    if not context.args:
-        return await msg.reply_text("Usage: /protect 1d|2d|3d|4d")
-    key = context.args[0].lower()
-    mapping = {"1d":1,"2d":2,"3d":3,"4d":4}
-    if key not in mapping:
-        return await msg.reply_text("Invalid option.")
-    days = mapping[key]
-    if not is_member(rec) and days > 2:
-        return await msg.reply_text("Non-members can buy max 2d protection. Become a member for longer protection.")
-    cost_per_day = 200
-    total_cost = cost_per_day * days
-    if rec.get("coins",0) < total_cost:
-        return await msg.reply_text(f"💸 Not enough coins. Cost: {total_cost}.")
-    rec["coins"] -= total_cost
-    rec["protected_until"] = now_ts() + days * 86400
-    save_user(rec)
-    await msg.reply_text(f"✅ Protection purchased for {days} day(s). -{total_cost} coins")
+    field_map = {
+        "membership": "membership_until",
+        "premium": "premium_until",
+        "infinity": "infinity_until"
+    }
 
-# -----------------------------
-# /prob <reply> (premium only steals 30%)
-# -----------------------------
-async def prob_cmd(update, context):
-    msg = update.message
-    if not msg or not msg.reply_to_message:
-        return await msg.reply_text("Reply to a user to use /prob.")
-    caller = ensure_user_record(msg.from_user)
-    target_user = msg.reply_to_message.from_user
-    target = ensure_user_record(target_user)
-    if not is_premium(caller):
-        return await msg.reply_text("❌ /prob is for Premium users only.")
-    if target.get("protected_until",0) > now_ts():
-        return await msg.reply_text("Target is protected. Action failed.")
-    take = int(target.get("coins",0) * PROB_TAKE_RATIO)
-    if take <= 0:
-        return await msg.reply_text("Target has no coins to take.")
-    target["coins"] = max(0, target.get("coins",0) - take)
-    caller["coins"] = caller.get("coins",0) + take
-    save_user(target); save_user(caller)
-    await msg.reply_text(f"🔱 You took {take} coins from {pretty_name_from_user(target_user)}!")
+    if item not in cost_map or giver["credits"] < cost_map[item]:
+        return await update.message.reply_text("❌ Not enough credits")
 
-# -----------------------------
-# /peditbal (private photo session)
-# -----------------------------
-async def peditbal_cmd(update, context):
-    msg = update.message
-    if not msg: return
-    if msg.chat.type != "private":
-        return await msg.reply_text("Please use /peditbal in a private chat with the bot.")
-    rec = ensure_user_record(msg.from_user)
-    if not is_member(rec) and not is_premium(rec):
-        return await msg.reply_text("Only members/premium can use /peditbal.")
-    # set session for user
-    sessions_table.upsert({"user_id": rec["user_id"], "action": "peditbal"}, Query().user_id == rec["user_id"])
-    await msg.reply_text("👑 Send me the image you want to save on your balance status. (Send a photo now)")
+    giver["credits"] -= cost_map[item]
+    target[field_map[item]] = max(now, target[field_map[item]]) + MEMBERSHIP_DAYS*86400
 
-async def handle_private_photo_sessions(update, context):
-    """A message handler for private photos — store file_id into profile_image_file_id."""
-    msg = update.message
-    if not msg or msg.chat.type != "private" or not msg.photo:
-        return
-    uid = msg.from_user.id
-    sess = sessions_table.get(Query().user_id == uid)
-    if not sess:
-        return
-    action = sess.get("action")
-    if action == "peditbal":
-        file_id = msg.photo[-1].file_id
-        rec = ensure_user_record(msg.from_user)
-        rec["profile_image_file_id"] = file_id
-        save_user(rec)
-        sessions_table.remove(Query().user_id == uid)
-        return await msg.reply_text("✅ Done! Profile image saved. Use /bal to view.")
+    users_col.update_one({"user_id": giver["user_id"]}, {"$set": giver})
+    users_col.update_one({"user_id": target["user_id"]}, {"$set": target})
 
-# -----------------------------
-# /gmute <reply> (members: 2 uses/day)
-# -----------------------------
-async def gmute_cmd(update, context):
-    msg = update.message
-    if not msg or not msg.reply_to_message:
-        return await msg.reply_text("Reply to a user to use /gmute.")
-    rec = ensure_user_record(msg.from_user)
-    if not is_member(rec):
-        return await msg.reply_text("❌ /gmute is for Members only.")
-    today = int(datetime.utcnow().strftime("%Y%m%d"))
-    if rec.get("gmute_uses_date",0) != today:
-        rec["gmute_uses_date"] = today
-        rec["gmute_uses_today"] = 0
-    if rec.get("gmute_uses_today",0) >= GMUTE_DAILY_LIMIT:
-        return await msg.reply_text("You used your /gmute limit for today.")
-    target = ensure_user_record(msg.reply_to_message.from_user)
-    target["gmute_until"] = now_ts() + GMUTE_SECONDS
-    save_user(target)
-    rec["gmute_uses_today"] = rec.get("gmute_uses_today",0) + 1
-    save_user(rec)
-    await msg.reply_text(f"✅ {pretty_name_from_user(msg.reply_to_message.from_user)} will be blocked from economy commands for 5 minutes.")
+    await update.message.reply_text("🎁 Gift successful")
 
-# -----------------------------
-# /check <reply> (premium costs CHECK_COST_COINS)
-# -----------------------------
-async def check_cmd(update, context):
-    msg = update.message
-    if not msg or not msg.reply_to_message:
-        return await msg.reply_text("Reply to a user to use /check.")
-    rec = ensure_user_record(msg.from_user)
-    if not is_premium(rec):
-        return await msg.reply_text("❌ /check is for Premium users only.")
-    if rec.get("coins",0) < CHECK_COST_COINS:
-        return await msg.reply_text(f"💸 You need {CHECK_COST_COINS} coins to use /check.")
-    rec["coins"] -= CHECK_COST_COINS
-    save_user(rec)
-    target = ensure_user_record(msg.reply_to_message.from_user)
-    p_until = target.get("protected_until",0)
-    await msg.reply_text(f"🔎 {pretty_name_from_user(msg.reply_to_message.from_user)} protected until: {format_ts(p_until) if p_until>0 else 'No'}")
+# END
 
-# -----------------------------
-# /free <reply> (member one-time)
-# -----------------------------
-async def free_cmd(update, context):
-    msg = update.message
-    if not msg or not msg.reply_to_message:
-        return await msg.reply_text("Reply to a user to use /free.")
-    rec = ensure_user_record(msg.from_user)
-    if not is_member(rec):
-        return await msg.reply_text("❌ /free is for Members only.")
-    if not rec.get("free_available", False):
-        return await msg.reply_text("❌ You already used your free perk.")
-    target = ensure_user_record(msg.reply_to_message.from_user)
-    amt = int(target.get("coins",0) * FREE_PERCENT)
-    if amt <= 0:
-        return await msg.reply_text("Target has no coins.")
-    target["coins"] = max(0, target.get("coins",0) - amt)
-    rec["coins"] = rec.get("coins",0) + amt
-    rec["free_available"] = False
-    save_user(target); save_user(rec)
-    await msg.reply_text(f"🎁 You received {amt} coins from {pretty_name_from_user(msg.reply_to_message.from_user)}!")
 
-# -----------------------------
-# Gift commands for gifting membership/premium to others (use credits)
-# /giftmembership <@user>  - spend 1 credit to gift membership (30d)
-# /giftpremium <@user>     - spend 5 credits to gift premium (30d)
-# -----------------------------
-async def giftmembership_cmd(update, context):
-    msg = update.message
-    if not msg: return
-    if not context.args and not msg.reply_to_message:
-        return await msg.reply_text("Usage: /giftmembership @user or reply to user.")
-    giver = ensure_user_record(msg.from_user)
-    if giver.get("credits",0) < MEMBERSHIP_COST_CREDITS:
-        return await msg.reply_text("❌ Not enough credits.")
-    # target
-    if msg.reply_to_message:
-        target_user = msg.reply_to_message.from_user
-    else:
-        target_user = None
-        arg = context.args[0]
-        if arg.startswith("@"):
-            # try to get by username from DB (simple)
-            target_rec = users_table.get(UserQ.username == arg[1:])
-            if target_rec:
-                target_user = type("X",(object,),{"id": target_rec["user_id"], "username": target_rec.get("username")})
-    if not target_user:
-        return await msg.reply_text("❌ Could not find target. Reply or use @username of a user present in DB.")
-    rec_t = ensure_user_record(target_user)
-    giver["credits"] -= MEMBERSHIP_COST_CREDITS
-    start = max(now_ts(), rec_t.get("membership_until",0))
-    rec_t["membership_until"] = start + MEMBERSHIP_DAYS*86400
-    reset_member_one_time_flags_on_buy(rec_t)
-    save_user(giver); save_user(rec_t)
-    await msg.reply_text(f"✅ Gifted membership to {pretty_name_from_user(target_user)} until {format_ts(rec_t['membership_until'])}.")
-
-async def giftpremium_cmd(update, context):
-    msg = update.message
-    if not msg: return
-    if not context.args and not msg.reply_to_message:
-        return await msg.reply_text("Usage: /giftpremium @user or reply to user.")
-    giver = ensure_user_record(msg.from_user)
-    if giver.get("credits",0) < PREMIUM_COST_CREDITS:
-        return await msg.reply_text("❌ Not enough credits.")
-    # target
-    if msg.reply_to_message:
-        target_user = msg.reply_to_message.from_user
-    else:
-        target_user = None
-        arg = context.args[0]
-        if arg.startswith("@"):
-            target_rec = users_table.get(UserQ.username == arg[1:])
-            if target_rec:
-                target_user = type("X",(object,),{"id": target_rec["user_id"], "username": target_rec.get("username")})
-    if not target_user:
-        return await msg.reply_text("❌ Could not find target. Reply or use @username of a user present in DB.")
-    rec_t = ensure_user_record(target_user)
-    giver["credits"] -= PREMIUM_COST_CREDITS
-    start = max(now_ts(), rec_t.get("premium_until",0))
-    rec_t["premium_until"] = start + MEMBERSHIP_DAYS*86400
-    save_user(giver); save_user(rec_t)
-    await msg.reply_text(f"✅ Gifted premium to {pretty_name_from_user(target_user)} until {format_ts(rec_t['premium_until'])}.")
 
 # ============================================================
 #                BROADCAST SYSTEM (0 FAILURE)
