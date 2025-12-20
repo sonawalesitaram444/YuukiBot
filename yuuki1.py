@@ -2742,7 +2742,6 @@ for handler in (
     bank_handlers +
     admin_handlers +
     membership_premium_handlers +
-    broadcast_handlers +
     other_handlers
 ):
     app.add_handler(handler)
