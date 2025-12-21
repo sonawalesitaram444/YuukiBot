@@ -21,7 +21,7 @@ from telegram.ext import (
 
 # ================== CONFIG ==================
 BOT_TOKEN = "8520734510:AAFuqA-MlB59vfnI_zUQiGiRQKEJScaUyFs"
-GROQ_API_KEY = "YOUR_GROQ_KEY"
+GROQ_API_KEY = "GROQ_API_KEY"
 OWNER_IDS = [5773908061]
 
 logging.basicConfig(
