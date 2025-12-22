@@ -20,7 +20,7 @@ from telegram.ext import (
 )
 
 # ---------------- CONFIG ----------------
-BOT_TOKEN = "8312215148:AAEYp1kZGcWn6pgWSxp8qgA_MR4i9HkfvWo"
+BOT_TOKEN = 8520734510:AAFuqA-MlB59vfnI_zUQiGiRQKEJScaUyFs"
 OWNER_IDS = [5773908061]
 
 MONGO_URI = "mongodb+srv://sonawalesitaram444_db_user:xqAwRv0ZdKMI6dDa@anixgrabber.a2tdbiy.mongodb.net/?appName=anixgrabber"
