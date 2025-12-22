@@ -1,249 +1,243 @@
 #!/usr/bin/env python3
-import random
+# ===============================
+# GREED ISLAND – NORMAL WORLD CORE
+# ===============================
+
 import logging
-import httpx
-from functools import wraps
+import random
 from pymongo import MongoClient
 from telegram import (
     Update,
     InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    InputMediaPhoto
+    InlineKeyboardMarkup
 )
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
-    MessageHandler,
     CallbackQueryHandler,
     ContextTypes,
     filters
 )
 
-# ================== CONFIG ==================
-BOT_TOKEN = "8520734510:AAFuqA-MlB59vfnI_zUQiGiRQKEJScaUyFs"
-GROQ_API_KEY = "GROQ_API_KEY"
+# ---------------- CONFIG ----------------
+BOT_TOKEN = "8312215148:AAEYp1kZGcWn6pgWSxp8qgA_MR4i9HkfvWo"
 OWNER_IDS = [5773908061]
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
+MONGO_URI = "mongodb+srv://sonawalesitaram444_db_user:xqAwRv0ZdKMI6dDa@anixgrabber.a2tdbiy.mongodb.net/?appName=anixgrabber"
 
-# ================== MONGODB ==================
-client = MongoClient(
-    "mongodb+srv://sonawalesitaram444_db_user:xqAwRv0ZdKMI6dDa@anixgrabber.a2tdbiy.mongodb.net/?appName=anixgrabber"
-)
-db = client["greed_island_ultra"]
+# ---------------- LOGGING ----------------
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# ---------------- DATABASE ----------------
+mongo = MongoClient(MONGO_URI)
+db = mongo["greed_island"]
 users = db["users"]
-cards = db["cards"]
 
-# ================== HELPERS ==================
-def get_user(user):
+# ---------------- MEMORY ----------------
+ACTIVE_FIGHTS = {}
+
+# ---------------- HELPERS ----------------
+def hp_bar(current, max_hp, size=20):
+    filled = int(size * current / max_hp)
+    return "█" * filled + "░" * (size - filled)
+
+def get_user(user, chat):
     data = users.find_one({"user_id": user.id})
     if not data:
         data = {
             "user_id": user.id,
             "name": user.first_name,
-            "hp": 100,
-            "aura": 100,
-            "coins": 1000,
-            "inventory": []
+            "hp": 1000,
+            "max_hp": 1000,
+            "nen": 0,
+            "strength": 1000,
+            "defence": 200,
+            "money": 600,
+            "gi_money": None,
+            "special_skill": None,
+            "in_gi": False,
+            "location": chat.title if chat else "Private"
         }
         users.insert_one(data)
     return data
 
+def save_user(user_id, data):
+    users.update_one({"user_id": user_id}, {"$set": data})
 
-def owner_only(func):
-    @wraps(func)
-    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if update.effective_user.id not in OWNER_IDS:
-            await update.message.reply_text("❌ GM Access Only.")
-            return
-        return await func(update, context)
-    return wrapper
-
-# ================== START ==================
+# ---------------- START ----------------
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    chat = update.effective_chat
+    get_user(user, chat)
     await update.message.reply_text(
-        "🏝️ **Greed Island Ultra**\n\n"
-        "Commands:\n"
-        "/book – Card Binder\n"
-        "/collect – Find a card\n\n"
-        "Yuuki is online 😎",
-        parse_mode="Markdown"
+        "🌍 Welcome to the World.\n\n"
+        "This is the NORMAL WORLD.\n"
+        "Greed Island awaits those worthy."
     )
 
-# ================== AI CHAT ==================
-async def yuuki_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or not update.message.text:
-        return
-
-    text = update.message.text.strip()
+# ---------------- PROFILE ----------------
+async def profile_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
     chat = update.effective_chat
+    data = get_user(user, chat)
 
-    # Group filter
-    if chat.type != "private":
-        if "yuuki" not in text.lower() and not (
-            update.message.reply_to_message
-            and update.message.reply_to_message.from_user.id == context.bot.id
-        ):
-            return
+    hp_text = hp_bar(data["hp"], data["max_hp"])
 
-    reply_text = "Haan bol 😄 kya scene hai?"
+    text = (
+        f"👤 **{data['name']}**\n\n"
+        f"❤️ HP\n"
+        f"`{hp_text}` {data['hp']}/{data['max_hp']}\n\n"
+        f"⚡ Nen : `{data['nen']}`\n"
+        f"💪 Strength : `{data['strength']}`\n"
+        f"💴 Jenny : `{data['money']}`\n"
+        f"🎮 GI Money : `{data['gi_money'] or 'None'}`\n"
+        f"🌀 Special Skill : `{data['special_skill'] or 'None'}`\n"
+        f"📍 Location : `{chat.title if chat else 'Private'}`"
+    )
 
-    try:
-        async with httpx.AsyncClient(timeout=8.0) as client_ai:
-            response = await client_ai.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {GROQ_API_KEY}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": "moonshotai/kimi-k2-instruct-0905",
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": "You are Yuuki. Reply in Hinglish. Friendly. Max 20 words."
-                        },
-                        {"role": "user", "content": text}
-                    ]
-                }
-            )
-            reply_text = response.json()["choices"][0]["message"]["content"]
+    await update.message.reply_text(text, parse_mode="Markdown")
 
-    except Exception as e:
-        logging.error(f"AI Error: {e}")
+# ---------------- FIGHT REQUEST ----------------
+async def fight_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message
+    user = msg.from_user
 
-    await update.message.reply_text(reply_text)
+    if not msg.reply_to_message:
+        return await msg.reply_text("❌ Reply to someone to fight.")
 
-# ================== BINDER ==================
-async def send_card_page(update, context, index, user_data, edit=False):
-    if index < 0:
-        index = 99
-    if index > 99:
-        index = 0
+    target = msg.reply_to_message.from_user
+    if target.id == user.id:
+        return await msg.reply_text("❌ You can’t fight yourself.")
 
-    card_id = f"{index:03}"
-    card = cards.find_one({"card_id": card_id})
-    owned = card_id in user_data["inventory"]
-
-    if not card:
-        text = f"🎴 *Card #{card_id}*\n\nGM has not uploaded this card yet."
-        photo = "https://via.placeholder.com/300x400?text=Locked"
-    elif not owned:
-        text = f"🎴 *Card #{card_id}*\n\nSlot khali hai!"
-        photo = card["file_id"]
-    else:
-        text = (
-            f"🃏 *{card['name']}*\n\n"
-            f"*ID:* {card_id}\n"
-            f"*Rank:* {card['rank']}\n"
-            f"*About:* {card['desc']}"
-        )
-        photo = card["file_id"]
-
-    keyboard = InlineKeyboardMarkup([
+    kb = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("⬅️", callback_data=f"page_{index-1}"),
-            InlineKeyboardButton(f"{index}/100", callback_data="noop"),
-            InlineKeyboardButton("➡️", callback_data=f"page_{index+1}")
+            InlineKeyboardButton("✅ Accept", callback_data=f"fight_accept:{user.id}"),
+            InlineKeyboardButton("❌ Decline", callback_data="fight_decline")
         ]
     ])
 
-    if edit:
-        await update.callback_query.edit_message_media(
-            InputMediaPhoto(photo, caption=text, parse_mode="Markdown"),
-            reply_markup=keyboard
-        )
-    else:
-        await update.message.reply_photo(
-            photo,
-            caption=text,
-            parse_mode="Markdown",
-            reply_markup=keyboard
-        )
-
-# ================== COMMANDS ==================
-async def book_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = get_user(update.effective_user)
-    await send_card_page(update, context, 0, user)
-
-
-async def collect_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    all_cards = list(cards.find())
-
-    if not all_cards:
-        await update.message.reply_text("❌ No cards available.")
-        return
-
-    found = random.choice(all_cards)
-    users.update_one(
-        {"user_id": user.id},
-        {"$addToSet": {"inventory": found["card_id"]}}
+    await msg.reply_text(
+        f"⚔️ Fight Request!\n\n"
+        f"{target.first_name}, you got a fight request from {user.first_name}",
+        reply_markup=kb
     )
 
-    await update.message.reply_text(
-        f"✨ You found *{found['name']}* (#{found['card_id']})",
-        parse_mode="Markdown"
-    )
-
-@owner_only
-async def upload_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.message
-
-    if not msg.reply_to_message or not msg.reply_to_message.photo:
-        await msg.reply_text("Reply to a photo with:\n/upload 001 SS Name | Description")
-        return
-
-    try:
-        raw = " ".join(context.args).split("|")
-        head = raw[0].strip().split(" ", 2)
-
-        cards.update_one(
-            {"card_id": head[0]},
-            {
-                "$set": {
-                    "rank": head[1],
-                    "name": head[2],
-                    "desc": raw[1].strip(),
-                    "file_id": msg.reply_to_message.photo[-1].file_id
-                }
-            },
-            upsert=True
-        )
-
-        await msg.reply_text(f"✅ Card {head[0]} uploaded")
-
-    except:
-        await msg.reply_text("❌ Format error.")
-
-# ================== CALLBACK ==================
-async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ---------------- FIGHT CALLBACK ----------------
+async def fight_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    if not query:
+    user = query.from_user
+    chat_id = query.message.chat.id
+    await query.answer()
+
+    if query.data == "fight_decline":
+        return await query.edit_message_text("❌ Fight declined.")
+
+    if query.data.startswith("fight_accept"):
+        attacker_id = int(query.data.split(":")[1])
+
+        p1 = users.find_one({"user_id": attacker_id})
+        p2 = users.find_one({"user_id": user.id})
+
+        if not p1 or not p2:
+            return await query.edit_message_text("❌ Player data missing.")
+
+        ACTIVE_FIGHTS[chat_id] = {
+            "p1": attacker_id,
+            "p2": user.id,
+            "turn": attacker_id
+        }
+
+        await show_fight_ui(query, p1, p2)
+
+# ---------------- FIGHT UI ----------------
+async def show_fight_ui(query, p1, p2):
+    kb = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("⚔️ Attack", callback_data="fight_attack"),
+            InlineKeyboardButton("🛡 Defend", callback_data="fight_defend")
+        ]
+    ])
+
+    await query.edit_message_text(
+        f"⚔️ **FIGHT STARTED**\n\n"
+        f"{p1['name']} vs {p2['name']}\n\n"
+        f"{p1['name']} HP: {p1['hp']}/{p1['max_hp']}\n"
+        f"{p2['name']} HP: {p2['hp']}/{p2['max_hp']}\n\n"
+        f"▶ Turn: {p1['name']}",
+        parse_mode="Markdown",
+        reply_markup=kb
+    )
+
+# ---------------- FIGHT ACTION ----------------
+async def fight_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user = query.from_user
+    chat_id = query.message.chat.id
+    await query.answer()
+
+    if chat_id not in ACTIVE_FIGHTS:
         return
 
-    await query.answer()
-    user = get_user(query.from_user)
+    fight = ACTIVE_FIGHTS[chat_id]
+    if fight["turn"] != user.id:
+        return await query.answer("Not your turn!", show_alert=True)
 
-    if query.data.startswith("page_"):
-        idx = int(query.data.split("_")[1])
-        await send_card_page(update, context, idx, user, edit=True)
+    attacker = users.find_one({"user_id": user.id})
+    defender_id = fight["p2"] if fight["p1"] == user.id else fight["p1"]
+    defender = users.find_one({"user_id": defender_id})
 
-# ================== MAIN ==================
+    dmg = max(50, attacker["strength"] // 10)
+    defender["hp"] -= dmg
+
+    if defender["hp"] <= 0:
+        await end_fight(query, attacker, defender)
+        return
+
+    save_user(defender_id, defender)
+    fight["turn"] = defender_id
+
+    await query.edit_message_text(
+        f"⚔️ Fight Ongoing\n\n"
+        f"{attacker['name']} dealt `{dmg}` damage!\n\n"
+        f"{attacker['name']} HP: {attacker['hp']}\n"
+        f"{defender['name']} HP: {defender['hp']}\n\n"
+        f"▶ Turn: {defender['name']}",
+        parse_mode="Markdown",
+        reply_markup=query.message.reply_markup
+    )
+
+# ---------------- END FIGHT ----------------
+async def end_fight(query, winner, loser):
+    text = f"🏆 **{winner['name']} WON!**\n\n"
+
+    if loser.get("in_gi"):
+        loser["in_gi"] = False
+        loser["gi_money"] = None
+        text += "☠️ You died in Greed Island.\nAll progress lost.\n"
+
+    loser["hp"] = loser["max_hp"]
+    winner["money"] += 200
+
+    save_user(loser["user_id"], loser)
+    save_user(winner["user_id"], winner)
+
+    del ACTIVE_FIGHTS[query.message.chat.id]
+
+    await query.edit_message_text(text, parse_mode="Markdown")
+
+# ---------------- MAIN ----------------
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start_cmd))
-    app.add_handler(CommandHandler("book", book_cmd))
-    app.add_handler(CommandHandler("collect", collect_cmd))
-    app.add_handler(CommandHandler("upload", upload_card))
-    app.add_handler(CallbackQueryHandler(handle_callbacks))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, yuuki_chat))
+    app.add_handler(CommandHandler("profile", profile_cmd))
+    app.add_handler(CommandHandler("fight", fight_cmd))
 
-    logging.info("Greed Island Ultra Bot Started")
+    app.add_handler(CallbackQueryHandler(fight_action, pattern="fight_"))
+    app.add_handler(CallbackQueryHandler(fight_callback))
+
+    print("Greed Island Core running...")
     app.run_polling()
 
 if __name__ == "__main__":
