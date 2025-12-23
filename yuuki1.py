@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-# =========================================
-# GREED ISLAND – NORMAL WORLD CORE
-# =========================================
-
-import ssl
 import logging
 import random
 from pymongo import MongoClient
@@ -19,34 +13,22 @@ from telegram.ext import (
     ContextTypes
 )
 
-# ---------- SSL FIX (RAILWAY + MONGO) ----------
-ssl._create_default_https_context = ssl._create_unverified_context
-
-# ---------- CONFIG ----------
+# ================= CONFIG =================
 BOT_TOKEN = "8520734510:AAFuqA-MlB59vfnI_zUQiGiRQKEJScaUyFs"
-MONGO_URI = "mongodb+srv://sonawalesitaram444_db_user:xqAwRv0ZdKMI6dDa@anixgrabber.a2tdbiy.mongodb.net/?appName=anixgrabber"
+MONGO_URI = "mongodb+srv://sonawalesitaram444_db_user:xqAwRv0ZdKMI6dDa@anixgrabber.a2tdbiy.mongodb.net/?retryWrites=true&w=majority"
+DB_NAME = "greed_island"
+# ========================================
 
 # ---------- LOGGING ----------
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 # ---------- DATABASE ----------
-mongo = MongoClient(
-    MONGO_URI + "&tls=true&tlsAllowInvalidCertificates=true",
-    serverSelectionTimeoutMS=30000
-)
-
-db = mongo["greed_island"]
-users = db["users"]
-
-# ---------- MEMORY ----------
-ACTIVE_FIGHTS = {}
+mongo = MongoClient(MONGO_URI)
+db = mongo[DB_NAME]
+users = db.users
+fights = db.fights
 
 # ---------- HELPERS ----------
-def hp_bar(cur, max_hp, size=20):
-    filled = int(size * cur / max_hp)
-    return "█" * filled + "░" * (size - filled)
-
 def get_user(user):
     data = users.find_one({"user_id": user.id})
     if not data:
@@ -57,156 +39,148 @@ def get_user(user):
             "max_hp": 1000,
             "nen": 0,
             "strength": 1000,
-            "money": 600,
-            "gi_money": None,
-            "skill": None,
+            "jenny": 500,
             "in_gi": False
         }
         users.insert_one(data)
     return data
 
-def save_user(uid, data):
-    users.update_one({"user_id": uid}, {"$set": data})
+def hp_bar(hp, max_hp):
+    filled = int(20 * hp / max_hp)
+    return "█" * filled + "░" * (20 - filled)
 
 # ---------- START ----------
-async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message:
-        return
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     get_user(update.effective_user)
     await update.message.reply_text(
-        "🌍 **World Initialized**\n\n"
-        "Commands:\n"
-        "/profile – view stats\n"
-        "/fight (reply) – start a fight",
+        "🌍 *Greed Island Initialized*\n\n"
+        "/profile – View stats\n"
+        "/fight (reply) – Fight player",
         parse_mode="Markdown"
     )
 
 # ---------- PROFILE ----------
-async def profile_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message:
-        return
-
+async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     u = get_user(update.effective_user)
-
-    text = (
-        f"👤 **{u['name']}**\n\n"
+    await update.message.reply_text(
+        f"👤 *{u['name']}*\n\n"
         f"❤️ HP\n`{hp_bar(u['hp'], u['max_hp'])}` {u['hp']}/{u['max_hp']}\n\n"
-        f"⚡ Nen : `{u['nen']}`\n"
-        f"💪 Strength : `{u['strength']}`\n"
-        f"💴 Jenny : `{u['money']}`\n"
-        f"🎮 GI Money : `{u['gi_money'] or 'None'}`\n"
-        f"🧠 Skill : `{u['skill'] or 'None'}`"
+        f"⚡ Nen: `{u['nen']}`\n"
+        f"💪 Strength: `{u['strength']}`\n"
+        f"💴 Jenny: `{u['jenny']}`\n"
+        f"🎮 GI Status: `{ 'Inside' if u['in_gi'] else 'Outside' }`",
+        parse_mode="Markdown"
     )
 
-    await update.message.reply_text(text, parse_mode="Markdown")
-
 # ---------- FIGHT ----------
-async def fight_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def fight(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
-    if not msg or not msg.reply_to_message:
+    if not msg.reply_to_message:
         return await msg.reply_text("❌ Reply to a user to fight.")
 
-    challenger = msg.from_user
-    target = msg.reply_to_message.from_user
+    attacker = msg.from_user
+    defender = msg.reply_to_message.from_user
 
-    if challenger.id == target.id:
-        return await msg.reply_text("❌ You cannot fight yourself.")
+    if attacker.id == defender.id:
+        return await msg.reply_text("❌ You can’t fight yourself.")
 
-    get_user(challenger)
-    get_user(target)
+    get_user(attacker)
+    get_user(defender)
 
     kb = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton(
-                "✅ Accept",
-                callback_data=f"accept:{challenger.id}:{target.id}"
-            ),
+            InlineKeyboardButton("✅ Accept", callback_data=f"accept:{attacker.id}"),
             InlineKeyboardButton("❌ Decline", callback_data="decline")
         ]
     ])
 
     await msg.reply_text(
-        f"⚔️ **Fight Request**\n\n"
-        f"{target.first_name}, do you accept the fight?",
+        f"⚔️ *Fight Request*\n\n"
+        f"{defender.first_name}, do you accept?",
         parse_mode="Markdown",
         reply_markup=kb
     )
 
 # ---------- CALLBACK ----------
-async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    if not q:
-        return
-
     await q.answer()
     chat_id = q.message.chat.id
     user = q.from_user
 
-    # DECLINE
     if q.data == "decline":
+        fights.delete_one({"chat_id": chat_id})
         return await q.edit_message_text("❌ Fight declined.")
 
-    # ACCEPT
     if q.data.startswith("accept:"):
-        _, atk_id, def_id = q.data.split(":")
-        atk_id, def_id = int(atk_id), int(def_id)
+        attacker_id = int(q.data.split(":")[1])
+        if user.id == attacker_id:
+            return await q.answer("❌ You can’t accept your own fight.", show_alert=True)
 
-        if user.id != def_id:
-            return await q.answer("❌ Not your fight.", show_alert=True)
+        fights.replace_one(
+            {"chat_id": chat_id},
+            {
+                "chat_id": chat_id,
+                "p1": attacker_id,
+                "p2": user.id,
+                "turn": attacker_id
+            },
+            upsert=True
+        )
 
-        p1 = users.find_one({"user_id": atk_id})
-        p2 = users.find_one({"user_id": def_id})
-
-        ACTIVE_FIGHTS[chat_id] = {
-            "p1": atk_id,
-            "p2": def_id,
-            "turn": atk_id
-        }
+        p1 = users.find_one({"user_id": attacker_id})
+        p2 = users.find_one({"user_id": user.id})
 
         return await q.edit_message_text(
-            f"⚔️ **FIGHT STARTED**\n\n"
+            f"⚔️ *FIGHT STARTED*\n\n"
             f"{p1['name']} vs {p2['name']}\n\n"
-            f"▶ Turn: **{p1['name']}**",
+            f"▶ Turn: {p1['name']}",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("⚔️ Attack", callback_data="attack")]
             ])
         )
 
-    # ATTACK
     if q.data == "attack":
-        fight = ACTIVE_FIGHTS.get(chat_id)
+        fight = fights.find_one({"chat_id": chat_id})
         if not fight or fight["turn"] != user.id:
-            return await q.answer("⛔ Not your turn!", show_alert=True)
+            return await q.answer("❌ Not your turn.", show_alert=True)
 
         attacker = users.find_one({"user_id": user.id})
         defender_id = fight["p2"] if fight["p1"] == user.id else fight["p1"]
         defender = users.find_one({"user_id": defender_id})
 
-        dmg = random.randint(80, 150) + attacker["strength"] // 20
+        dmg = random.randint(80, 150) + attacker["strength"] // 30
         defender["hp"] -= dmg
 
-        # DEATH
         if defender["hp"] <= 0:
-            defender["hp"] = defender["max_hp"]
-            save_user(defender_id, defender)
-            del ACTIVE_FIGHTS[chat_id]
+            users.update_one(
+                {"user_id": defender_id},
+                {"$set": {"hp": defender["max_hp"]}}
+            )
+            fights.delete_one({"chat_id": chat_id})
 
             return await q.edit_message_text(
-                f"🏆 **{attacker['name']} WON!**\n\n"
+                f"🏆 *{attacker['name']} WON!*\n"
                 f"💥 Damage: `{dmg}`",
                 parse_mode="Markdown"
             )
 
-        save_user(defender_id, defender)
-        fight["turn"] = defender_id
+        users.update_one(
+            {"user_id": defender_id},
+            {"$set": {"hp": defender["hp"]}}
+        )
+        fights.update_one(
+            {"chat_id": chat_id},
+            {"$set": {"turn": defender_id}}
+        )
 
-        return await q.edit_message_text(
-            f"⚔️ **Fight Ongoing**\n\n"
+        await q.edit_message_text(
+            f"⚔️ *Battle Ongoing*\n\n"
             f"{attacker['name']} dealt `{dmg}` damage\n\n"
             f"{attacker['name']} HP: `{attacker['hp']}`\n"
             f"{defender['name']} HP: `{defender['hp']}`\n\n"
-            f"▶ Turn: **{defender['name']}**",
+            f"▶ Turn: {defender['name']}",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("⚔️ Attack", callback_data="attack")]
@@ -217,12 +191,12 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    app.add_handler(CommandHandler("start", start_cmd))
-    app.add_handler(CommandHandler("profile", profile_cmd))
-    app.add_handler(CommandHandler("fight", fight_cmd))
-    app.add_handler(CallbackQueryHandler(callback_handler))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("profile", profile))
+    app.add_handler(CommandHandler("fight", fight))
+    app.add_handler(CallbackQueryHandler(callbacks))
 
-    print("✅ Greed Island Core Running")
+    print("✅ Greed Island MongoDB Bot Running")
     app.run_polling()
 
 if __name__ == "__main__":
