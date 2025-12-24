@@ -10,7 +10,7 @@ from telegram.ext import (
 )
 
 # ================= CONFIG =================
-BOT_TOKEN = os.getenv("8520734510:AAFuqA-MlB59vfnI_zUQiGiRQKEJScaUyFs")
+BOT_TOKEN = os.getenv("YOUR_BOT_TOKEN")
 MONGO_URL = os.getenv("mongodb+srv://sonawalesitaram444_db_user:xqAwRv0ZdKMI6dDa@anixgrabber.a2tdbiy.mongodb.net/?appName=anixgrabber")
 
 OWNER_IDS = {5773908061}
