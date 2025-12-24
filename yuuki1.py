@@ -23,7 +23,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ================= DATABASE =================
-mongo = MongoClient(MONGO_URI)
+mongo = MongoClient(MONGO_URL)
 db = mongo["greed_island"]
 players = db["players"]
 
