@@ -1,128 +1,122 @@
-import os
-import random
-import time
-import requests
+import logging
 from pymongo import MongoClient
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler
+from telegram import Update
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    ContextTypes
+)
 
-# ---------------- CONFIG ----------------
-TOKEN = "8520734510:AAFuqA-MlB59vfnI_zUQiGiRQKEJScaUyFs"
-MONGO_URL = "mongodb+srv://sonawalesitaram444_db_user:xqAwRv0ZdKMI6dDa@anixgrabber.a2tdbiy.mongodb.net/?appName=anixgrabber"
-GROQ_API_KEY = "GROQ_API_KEY"
+# ================= CONFIG =================
+BOT_TOKEN = "8520734510:AAFuqA-MlB59vfnI_zUQiGiRQKEJScaUyFs"
+MONGO_URL = "MONGO_URI"
 
+OWNER_IDS = {5773908061}  # <-- PUT OWNER ID(s)
+
+DB_NAME = "greed_island"
+COLLECTION = "players"
+
+# ================= LOGGING =================
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
+
+# ================= DATABASE =================
 client = MongoClient(MONGO_URL)
-db = client["greed_island"]
-players = db["players"]
-cities = db["cities"]
-quests = db["quests"]
+db = client[DB_NAME]
+players = db[COLLECTION]
 
-# ---------------- FONT ----------------
-font_map = {
-    'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ',
-    'f': 'ꜰ', 'g': 'ɢ', 'h': 'ʜ', 'i': 'ɪ', 'j': 'ᴊ',
-    'k': 'ᴋ', 'l': 'ʟ', 'm': 'ᴍ', 'n': 'ɴ', 'o': 'ᴏ',
-    'p': 'ᴘ', 'q': 'ǫ', 'r': 'ʀ', 's': 's', 't': 'ᴛ',
-    'u': 'ᴜ', 'v': 'ᴠ', 'w': 'ᴡ', 'x': 'x', 'y': 'ʏ', 'z': 'ᴢ',
-    'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ', 'E': 'ᴇ',
-    'F': 'ꜰ', 'G': 'ɢ', 'H': 'ʜ', 'I': 'ɪ', 'J': 'ᴊ',
-    'K': 'ᴋ', 'L': 'ʟ', 'M': 'ᴍ', 'N': 'ɴ', 'O': 'ᴏ',
-    'P': 'ᴘ', 'Q': 'ǫ', 'R': 'ʀ', 'S': 's', 'T': 'ᴛ',
-    'U': 'ᴜ', 'V': 'ᴠ', 'W': 'ᴡ', 'X': 'x', 'Y': 'ʏ', 'Z': 'ᴢ',
-    '0':'0','1':'1','2':'2','3':'3','4':'4','5':'5',
-    '6':'6','7':'7','8':'8','9':'9',
-    ' ':' '
-}
-def yuuki(text): return ''.join(font_map.get(c, c) for c in text)
+# ================= FONT SYSTEM =================
+def yuuki(text: str) -> str:
+    return f"Tʜɪs ʏᴜᴜᴋɪ\n\n{text}"
 
-# ---------------- HELPER ----------------
-def init_player(user_id, username):
-    if not players.find_one({"user_id": user_id}):
-        players.insert_one({
-            "user_id": user_id,
-            "username": username,
-            "hp": 100,
-            "nen": 10,
-            "strength": random.randint(100, 1000),
-            "kills": 0,
-            "alive": True,
-            "location": "HxH World",
-            "special_skill": "Ren Burst",
-            "console": True,
-            "book": [],
-            "party": None,
-            "cooldowns": {}
-        })
+# ================= PLAYER HELPERS =================
+def get_player(user):
+    return players.find_one({"user_id": user.id})
 
-async def groq_talk(prompt):
-    url = "https://api.groq.com/v1/generate"
-    headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
-    data = {"prompt": prompt, "max_output_tokens": 100}
-    res = requests.post(url, json=data, headers=headers).json()
-    return res.get("text","I cannot answer that.")
+def create_player(user):
+    data = {
+        "user_id": user.id,
+        "username": user.username,
+        "name": user.first_name,
+        "hp": 100,
+        "max_hp": 100,
+        "nen": 10,
+        "nen_type": None,
+        "strength": 10,
+        "kills": 0,
+        "alive": True,
+        "location": "HxH World",
+        "console": False,
+        "binder": [],
+        "inventory": [],
+        "milla": 0,
+        "party": None,
+        "is_owner": user.id in OWNER_IDS
+    }
+    players.insert_one(data)
+    return data
 
-# ---------------- COMMANDS ----------------
+# ================= COMMANDS =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    init_player(update.effective_user.id, update.effective_user.username)
-    await update.message.reply_text(yuuki("ʜᴇʟʟᴏ ᴀɴᴅ ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ ɢʀᴇᴇᴅ ɪsʟᴀɴᴅ ʙᴏᴛ!"))
+    user = update.effective_user
+    player = get_player(user)
 
-# ---------------- CONSOLE ----------------
-async def console(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = players.find_one({"user_id": update.effective_user.id})
-    if not user:
-        await update.message.reply_text(yuuki("ᴘʟᴇᴀsᴇ ᴜsᴇ /start ғɪʀsᴛ"))
+    if not player:
+        player = create_player(user)
+        await update.message.reply_text(
+            yuuki(
+                f"Welcome {user.first_name}\n"
+                f"You have entered the world of Greed Island.\n\n"
+                f"Status: Registered\n"
+                f"Location: HxH World"
+            )
+        )
+    else:
+        await update.message.reply_text(
+            yuuki(
+                f"Welcome back {user.first_name}\n"
+                f"Location: {player['location']}\n"
+                f"HP: {player['hp']}/{player['max_hp']}\n"
+                f"Nen: {player['nen']}"
+            )
+        )
+
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    player = get_player(user)
+
+    if not player:
+        await update.message.reply_text(
+            yuuki("You are not registered. Use /start")
+        )
         return
-    text = f"""🖥️ ᴄᴏɴsᴏʟᴇ
-📍 ʟᴏᴄᴀᴛɪᴏɴ: {user['location']}
-💖 ʜᴘ: {user['hp']}
-🌀 ɴᴇɴ: {user['nen']}
-💪 sᴛʀᴇɴɢᴛʜ: {user['strength']}
-⚔️ ᴋɪʟʟs: {user['kills']}
-✨ sᴘᴇᴄɪᴀʟ sᴋɪʟʟ: {user['special_skill']}
-"""
-    buttons = [
-        [InlineKeyboardButton(yuuki("💥 Fɪɢʜᴛ"), callback_data="fight")],
-        [InlineKeyboardButton(yuuki("🎯 Qᴜᴇsᴛ"), callback_data="quest")],
-        [InlineKeyboardButton(yuuki("🗺️ Tʀᴀᴠᴇʟ"), callback_data="travel")],
-        [InlineKeyboardButton(yuuki("💬 Tᴀʟᴋ"), callback_data="talk")]
-    ]
-    await update.message.reply_text(yuuki(text), reply_markup=InlineKeyboardMarkup(buttons))
 
-# ---------------- FIGHT SYSTEM ----------------
-async def fight_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    await query.message.reply_text(yuuki("ғɪɢʜᴛ ᴄᴏᴍɪɴɢ sᴏᴏɴ... ʙᴜɪʟᴅɪɴɢ ʙᴀsɪᴄ ᴘᴠᴘ"))
+    text = (
+        f"Name: {player['name']}\n"
+        f"HP: {player['hp']}/{player['max_hp']}\n"
+        f"Nen: {player['nen']}\n"
+        f"Strength: {player['strength']}\n"
+        f"Kills: {player['kills']}\n"
+        f"Location: {player['location']}\n"
+        f"Console: {'Yes' if player['console'] else 'No'}"
+    )
 
-# ---------------- QUEST SYSTEM ----------------
-async def quest_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    quest_list = ["ᴋɪʟʟ 5 ᴘʟᴀʏᴇʀs", "ʀᴏʙ 3 ᴘʟᴀʏᴇʀs", "ᴛʀᴀɪɴ ɴᴇɴ", "ᴄᴏʟʟᴇᴄᴛ ʀᴇᴡᴀʀᴅs"]
-    buttons = [[InlineKeyboardButton(yuuki(q), callback_data=f"start_{i}")] for i,q in enumerate(quest_list)]
-    await query.message.reply_text(yuuki("🎯 ʀᴀɴᴅᴏᴍ ǫᴜᴇsᴛs:"), reply_markup=InlineKeyboardMarkup(buttons))
+    if player["is_owner"]:
+        text += "\nRole: OWNER"
 
-# ---------------- TALKING SYSTEM ----------------
-async def talk_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    answer = await groq_talk("Hello! Pretend you are Yuuki Bot.")
-    await query.message.reply_text(yuuki(answer))
+    await update.message.reply_text(yuuki(text))
 
-# ---------------- CALLBACK ----------------
-async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    data = query.data
-    if data == "fight": await fight_handler(update, context)
-    elif data == "quest": await quest_handler(update, context)
-    elif data == "talk": await talk_handler(update, context)
-    elif data == "travel": await query.message.reply_text(yuuki("ʀᴀᴠᴇʟ sʏsᴛᴇᴍ ᴄᴏᴍɪɴɢ sᴏᴏɴ"))
+# ================= MAIN =================
+def main():
+    app = Application.builder().token(BOT_TOKEN).build()
 
-# ---------------- MAIN ----------------
-app = ApplicationBuilder().token(TOKEN).build()
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("console", console))
-app.add_handler(CallbackQueryHandler(button_callback))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("stats", stats))
 
-print("ʏᴜᴜᴋɪ ɢʀᴇᴇᴅ ɪsʟᴀɴᴅ ʙᴏᴛ ʀᴜɴɴɪɴɢ...")
-app.run_polling()
+    print("Bot is running...")
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
