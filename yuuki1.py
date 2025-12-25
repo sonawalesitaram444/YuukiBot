@@ -1,12 +1,21 @@
 import logging
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
+
 from tinydb import TinyDB, Query
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup
+)
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    ContextTypes
+)
 
 # ================= CONFIG =================
-BOT_TOKEN = "8520734510:AAFuqA-MlB59vfnI_zUQiGiRQKEJScaUyFs"
+BOT_TOKEN = "YOUR_BOT_TOKEN"
 OWNER_IDS = {5773908061}
 
 # ================= LOGGING =================
@@ -18,7 +27,7 @@ db = TinyDB("greed_island.json")
 players = db.table("players")
 Player = Query()
 
-# ================= AUTO YUUKI FONT =================
+# ================= FONT (LETTERS ONLY) =================
 FONT_MAP = str.maketrans(
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
     "ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀꜱᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀꜱᴛᴜᴠᴡxʏᴢ"
@@ -34,124 +43,183 @@ def is_owner(uid: int) -> bool:
 def get_player(uid: int):
     return players.get(Player.user_id == uid)
 
+def clickable(user_id: int, name: str) -> str:
+    return f"[{name}](tg://user?id={user_id})"
+
 def create_player(user):
     data = {
         "user_id": user.id,
-        "username": user.username or user.first_name,
+        "name": user.first_name,
         "hp": 100,
         "nen": 10,
         "strength": 10,
+        "wins": 0,
         "kills": 0,
-        "milla": 0,
-        "location": "Outside GI",
+        "greed_coins": 0,
         "alive": True,
+        "last_daily": None,
         "created_at": str(datetime.utcnow())
     }
     players.insert(data)
     return data
 
-# ================= COMMANDS =================
+# ================= START =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     player = get_player(user.id)
 
     if not player:
         create_player(user)
-        msg = "Welcome to the Hunter World\nUse /stats to view your profile"
+        text = (
+            "Welcome to the Hunter World 🌍\n\n"
+            "Train your Nen, fight players, earn Milla,\n"
+            "and prepare yourself for Greed Island.\n\n"
+            "Use /stats to view your profile."
+        )
     else:
-        msg = "You are already registered"
+        text = "You are already registered in this world."
 
-    await update.message.reply_text(yuuki(msg))
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Support", url="https://t.me/team_bright_lightX")],
+        [InlineKeyboardButton("Updates", url="https://t.me/YUUKIUPDATES")],
+        [InlineKeyboardButton("Add me to Group", url=f"https://t.me/{context.bot.username}?startgroup=true")]
+    ])
 
+    await update.message.reply_text(
+        yuuki(text),
+        reply_markup=keyboard
+    )
+
+# ================= STATS =================
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    player = get_player(update.effective_user.id)
+    p = get_player(update.effective_user.id)
+    if not p:
+        return await update.message.reply_text(yuuki("Use /start first."))
 
-    if not player:
-        return await update.message.reply_text(yuuki("Use /start first"))
-
-    hp_bar = "█" * (player["hp"] // 10) + "░" * (10 - player["hp"] // 10)
+    hp_bar = "█" * (p["hp"] // 10) + "░" * (10 - p["hp"] // 10)
 
     text = (
-        f"Name: {player['username']}\n"
-        f"HP: {hp_bar} ({player['hp']})\n"
-        f"Nen: {player['nen']}\n"
-        f"Strength: {player['strength']}\n"
-        f"Kills: {player['kills']}\n"
-        f"Milla: {player['milla']}\n"
-        f"Location: {player['location']}\n"
-        f"Status: {'Alive' if player['alive'] else 'Dead'}"
+        f"Name: {p['name']}\n"
+        f"HP: {hp_bar} ({p['hp']})\n"
+        f"Nen: {p['nen']}\n"
+        f"Strength: {p['strength']}\n"
+        f"Wins: {p['wins']}\n"
+        f"Kills: {p['kills']}\n"
+        f"greed_coins: {p['milla']}"
     )
 
     await update.message.reply_text(yuuki(text))
 
-# ================= FIGHT SYSTEM =================
+# ================= FIGHT =================
 async def fight(update: Update, context: ContextTypes.DEFAULT_TYPE):
     attacker = get_player(update.effective_user.id)
-
     if not attacker:
-        return await update.message.reply_text(yuuki("Use /start first"))
+        return await update.message.reply_text(yuuki("Use /start first."))
 
     if not update.message.reply_to_message:
-        return await update.message.reply_text(
-            yuuki("Reply to a player message to fight")
-        )
+        return await update.message.reply_text(yuuki("Reply to a player to fight."))
 
-    target_user = update.message.reply_to_message.from_user
-    defender = get_player(target_user.id)
+    target = update.message.reply_to_message.from_user
+    defender = get_player(target.id)
 
     if not defender:
-        return await update.message.reply_text(yuuki("Target not registered"))
+        return await update.message.reply_text(yuuki("Target not registered."))
 
-    if not attacker["alive"]:
-        return await update.message.reply_text(yuuki("You are dead"))
+    atk = random.randint(attacker["strength"], attacker["strength"] + 20)
+    dfs = random.randint(defender["strength"], defender["strength"] + 20)
 
-    if not defender["alive"]:
-        return await update.message.reply_text(yuuki("Target already dead"))
-
-    atk_damage = random.randint(attacker["strength"] // 2, attacker["strength"])
-    def_damage = random.randint(defender["strength"] // 3, defender["strength"] // 2)
-
-    attacker["hp"] -= def_damage
-    defender["hp"] -= atk_damage
-
-    result = (
-        f"Fight Result\n\n"
-        f"{attacker['username']} dealt {atk_damage} damage\n"
-        f"{defender['username']} dealt {def_damage} damage"
-    )
-
-    if defender["hp"] <= 0:
-        defender["alive"] = False
+    if atk > dfs:
+        attacker["wins"] += 1
         attacker["kills"] += 1
-        attacker["milla"] += 50
-        result += f"\n\n{defender['username']} is DEAD"
-
-    if attacker["hp"] <= 0:
-        attacker["alive"] = False
-        result += f"\n\n{attacker['username']} is DEAD"
+        attacker["Greed_Coins"] += 60
+        defender["hp"] -= 25
+        result = (
+            f"{clickable(attacker['user_id'], attacker['name'])} WON\n\n"
+            f"Defeated {clickable(defender['user_id'], defender['name'])}\n"
+            f"Total Wins: {attacker['wins']}\n"
+            f"+60 Greed coins"
+        )
+    else:
+        attacker["hp"] -= 15
+        result = (
+            f"{clickable(defender['user_id'], defender['name'])} WON\n\n"
+            f"{clickable(attacker['user_id'], attacker['name'])} was defeated"
+        )
 
     players.update(attacker, Player.user_id == attacker["user_id"])
     players.update(defender, Player.user_id == defender["user_id"])
 
-    await update.message.reply_text(yuuki(result))
+    await update.message.reply_text(
+        yuuki(result),
+        parse_mode="Markdown"
+    )
 
-# ================= BROADCAST =================
-async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_owner(update.effective_user.id):
-        return await update.message.reply_text(yuuki("Access denied"))
+# ================= TRAIN =================
+async def train(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    p = get_player(update.effective_user.id)
+    if not p:
+        return await update.message.reply_text(yuuki("Use /start first."))
 
-    if not context.args:
-        return await update.message.reply_text(yuuki("Usage: /broadcast message"))
+    p["nen"] += 18
+    p["strength"] += 30
+    p["hp"] -= 2
 
-    msg = " ".join(context.args)
+    players.update(p, Player.user_id == p["user_id"])
 
-    for p in players.all():
-        try:
-            await context.bot.send_message(p["user_id"], yuuki(msg))
-        except:
-            pass
+    text = (
+        "Training Complete\n\n"
+        "Nen: +18\n"
+        "Strength: +30\n"
+        "HP: -2"
+    )
 
-    await update.message.reply_text(yuuki("Broadcast sent"))
+    await update.message.reply_text(yuuki(text))
+
+# ================= WORK =================
+async def work(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    p = get_player(update.effective_user.id)
+    earn = random.randint(20, 50)
+    p["greed_coins"] += earn
+    players.update(p, Player.user_id == p["user_id"])
+    await update.message.reply_text(yuuki(f"You earned {earn} greed coins."))
+
+# ================= DAILY =================
+async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    p = get_player(update.effective_user.id)
+    now = datetime.utcnow()
+
+    if p["last_daily"]:
+        last = datetime.fromisoformat(p["last_daily"])
+        if now - last < timedelta(hours=24):
+            return await update.message.reply_text(yuuki("Daily already claimed."))
+
+    p["last_daily"] = now.isoformat()
+    p["Greed coins"] += 100
+    players.update(p, Player.user_id == p["user_id"])
+    await update.message.reply_text(yuuki("Daily reward claimed: +100 Greed Coins"))
+
+# ================= QUEST =================
+async def quest(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    p = get_player(update.effective_user.id)
+    reward = random.randint(80, 150)
+    p["greed_coins"] += reward
+    players.update(p, Player.user_id == p["user_id"])
+    await update.message.reply_text(yuuki(f"Quest completed\n+{reward} Greed coins"))
+
+# ================= LEADERBOARDS =================
+async def tkill(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    top = sorted(players.all(), key=lambda x: x["kills"], reverse=True)[:10]
+    text = "Top Kills\n\n"
+    for i, p in enumerate(top, 1):
+        text += f"{i}. {clickable(p['user_id'], p['name'])} — {p['kills']}\n"
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+async def trich(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    top = sorted(players.all(), key=lambda x: x["greed_coins"], reverse=True)[:10]
+    text = "Top Rich\n\n"
+    for i, p in enumerate(top, 1):
+        text += f"{i}. {clickable(p['user_id'], p['name'])} — {p['greed_coins']}\n"
+    await update.message.reply_text(text, parse_mode="Markdown")
 
 # ================= MAIN =================
 def main():
@@ -160,7 +228,12 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("stats", stats))
     app.add_handler(CommandHandler("fight", fight))
-    app.add_handler(CommandHandler("broadcast", broadcast))
+    app.add_handler(CommandHandler("train", train))
+    app.add_handler(CommandHandler("work", work))
+    app.add_handler(CommandHandler("daily", daily))
+    app.add_handler(CommandHandler("quest", quest))
+    app.add_handler(CommandHandler("tkill", tkill))
+    app.add_handler(CommandHandler("trich", trich))
 
     logger.info("Greed Island core running...")
     app.run_polling()
