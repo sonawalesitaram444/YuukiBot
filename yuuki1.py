@@ -15,7 +15,7 @@ from telegram.ext import (
 )
 
 # ================= CONFIG =================
-BOT_TOKEN = "YOUR_BOT_TOKEN"
+BOT_TOKEN = "8520734510:AAFuqA-MlB59vfnI_zUQiGiRQKEJScaUyFs"
 OWNER_IDS = {5773908061}
 
 # ================= LOGGING =================
