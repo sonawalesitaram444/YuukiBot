@@ -1,2 +1,3 @@
-python-telegram-bot==21.6
-tinydb
+python-telegram-bot==20.7
+pymongo[srv]==4.6.1
+dnspython==2.6.1
