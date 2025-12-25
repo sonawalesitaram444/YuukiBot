@@ -1,31 +1,21 @@
-import os
 import logging
 from datetime import datetime
-from pymongo import MongoClient
+from tinydb import TinyDB, Query
 from telegram import Update
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    ContextTypes
-)
+from telegram.ext import Application, CommandHandler, ContextTypes
 
 # ================= CONFIG =================
-BOT_TOKEN = os.getenv("YOUR_BOT_TOKEN")
-MONGO_URL = os.getenv("MONGO_URL")
-
+BOT_TOKEN = "8520734510:AAFuqA-MlB59vfnI_zUQiGiRQKEJScaUyFs"
 OWNER_IDS = {5773908061}
 
 # ================= LOGGING =================
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ================= DATABASE =================
-mongo = MongoClient(MONGO_URL)
-db = mongo["greed_island"]
-players = db["players"]
+db = TinyDB("greed_island.json")
+players = db.table("players")
+Player = Query()
 
 # ================= FONT =================
 def yuuki(text: str) -> str:
@@ -36,7 +26,7 @@ def is_owner(uid: int) -> bool:
     return uid in OWNER_IDS
 
 def get_player(uid: int):
-    return players.find_one({"user_id": uid})
+    return players.get(Player.user_id == uid)
 
 def create_player(user):
     data = {
@@ -44,19 +34,15 @@ def create_player(user):
         "username": user.username or user.first_name,
         "hp": 100,
         "nen": 10,
-        "nen_type": "Unawakened",
         "strength": 10,
         "kills": 0,
         "milla": 0,
         "location": "HxH World",
         "alive": True,
         "console": False,
-        "binder": [],
-        "inventory": [],
-        "party": None,
-        "created_at": datetime.utcnow()
+        "created_at": str(datetime.utcnow())
     }
-    players.insert_one(data)
+    players.insert(data)
     return data
 
 # ================= COMMANDS =================
@@ -66,20 +52,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not player:
         create_player(user)
-        msg = "Welcome to the HxH world.\nUse /stats to view your profile."
+        msg = "Welcome to Greed Island.\nUse /stats to see your power."
     else:
         msg = "You are already registered."
 
     await update.message.reply_text(yuuki(msg))
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    player = get_player(user.id)
+    player = get_player(update.effective_user.id)
 
     if not player:
-        return await update.message.reply_text(
-            yuuki("You are not registered. Use /start.")
-        )
+        return await update.message.reply_text(yuuki("Use /start first."))
 
     hp_bar = "█" * (player["hp"] // 10) + "░" * (10 - player["hp"] // 10)
 
@@ -91,7 +74,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Kills: {player['kills']}\n"
         f"Milla: {player['milla']}\n"
         f"Location: {player['location']}\n"
-        f"Console: {'Yes' if player['console'] else 'No'}"
+        f"Status: {'Alive' if player['alive'] else 'Dead'}"
     )
 
     await update.message.reply_text(yuuki(text))
@@ -100,12 +83,11 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_owner(update.effective_user.id):
         return await update.message.reply_text(yuuki("Access denied."))
 
-    if not context.args:
+    msg = " ".join(context.args)
+    if not msg:
         return await update.message.reply_text(yuuki("Usage: /broadcast <msg>"))
 
-    msg = " ".join(context.args)
-
-    for p in players.find():
+    for p in players.all():
         try:
             await context.bot.send_message(p["user_id"], yuuki(msg))
         except:
