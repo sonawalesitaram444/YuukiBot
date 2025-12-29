@@ -1,66 +1,58 @@
-from telegram import (                                                                                                    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup
-)
+import os
+import random
+import math
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder,                                                                                                   CommandHandler,
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
     CallbackQueryHandler,
-    ContextTypes
+    ContextTypes,
+    filters
 )
+from groq import Groq
 
 # ================= CONFIG =================
-TOKEN = "8160955111:AAH4rSihP8JQdt-AcXYGapebuuT2F-BglxA"   # <-- BotFather token
-BOTNAME = "˹ 𝐄𝐥𝐢𝐭𝐞 ✘ 𝐇ᴏꜱᴛᴇʀ ˼"                                                                                        DEVELOPER_USERNAME = "RJVTAX"
-CHANNEL = "@YUUKIUPDATES"
+TOKEN = os.getenv("8160955111:AAH4rSihP8JQdt-AcXYGapebuuT2F-BglxA")
+GROQ_API_KEY = os.getenv("GROQ_KEY")
+OWNER_ID = 5773908061  # change if needed
 
-# ================= TEXTS =================                                                                           START_TEXT = f"""
-┌────── ˹ ɪɴғᴏʀᴍᴀᴛɪᴏɴ ˼ ⏤͟͟͞͞‌‌‌‌★
-┆◍ ʜᴇʏ, ɪ ᴀᴍ : ˹ 𝐄𝐥𝐢𝐭𝐞 ✘ 𝐇ᴏꜱᴛᴇʀ ˼                                                                                     ┆● ɴɪᴄᴇ ᴛᴏ ᴍᴇᴇᴛ ʏᴏᴜ !
+BOTNAME = "˹ 𝐄𝐥𝐢𝐭𝐞 ✘ 𝐇ᴏꜱᴛᴇʀ ˼"
+DEVELOPER_USERNAME = "RJVTAX"
+
+client = Groq(api_key=GROQ_API_KEY)
+
+# ================= STATE =================
+group_message_count = {}
+math_interval = {}
+math_level = {}
+
+# ================= TEXT =================
+START_TEXT = f"""
+┌────── ˹ ɪɴғᴏʀᴍᴀᴛɪᴏɴ ˼ ⏤͟͟͞͞ ★
+┆◍ ʜᴇʏ, ɪ ᴀᴍ : {BOTNAME}
+┆● ɴɪᴄᴇ ᴛᴏ ᴍᴇᴇᴛ ʏᴏᴜ !
 └─────────────────────•
-❖ ɪ ᴀᴍ ᴀ ᴘᴏᴡᴇʀғᴜʟ ɪᴅ-ᴜsᴇʀ-ʙᴏᴛ
-❖ ʏᴏᴜ ᴄᴀɴ ᴜsᴇ ᴍᴇ ғᴏʀ ғᴜɴ.                                                                                             ❖ ɪ ᴄᴀɴ ʙᴏᴏsᴛ ʏᴏᴜʀ ɪᴅ
+❖ ᴀ ᴛᴀʟᴋɪɴɢ + ᴍɪɴɪ ɢᴀᴍᴇs ʙᴏᴛ
+❖ ᴍᴀᴅᴇ ғᴏʀ ғᴜɴ & ɪɴᴛᴇʀᴀᴄᴛɪᴏɴ
 •─────────────────────•
-❖ ʙʏ : <a href="https://t.me/{DEVELOPER_USERNAME}">『𓋹』 🇷 🇯 『〔☤〕』</a>
+❖ ʙʏ : <a href="https://t.me/{DEVELOPER_USERNAME}">RJ</a>
 """
 
-ABOUT_TEXT = f"""
-ᴀʙᴏᴜᴛ ᴛʜɪꜱ ʙᴏᴛ 🌙
-
-ᴛᴇʟᴇɢʀᴀᴍ ʙᴏᴛ ᴛᴏ ʙᴏᴏsᴛ ʏᴏᴜʀ ɪᴅ
-ᴡɪᴛʜ ʙᴇᴀᴜᴛɪғᴜʟ ᴀɴɪᴍᴀᴛɪᴏɴ.
-
-◌ ʟᴀɴɢᴜᴀɢᴇ : ᴘʏᴛʜᴏɴ
-◌ ᴘᴏᴡᴇʀᴇᴅ ʙʏ : {CHANNEL}
-◌ ᴅᴇᴠᴇʟᴏᴘᴇʀ : <a href="https://t.me/{DEVELOPER_USERNAME}">『𓋹』 🇷 🇯 『〔☤〕』</a>
-"""
-
-HELP_TEXT = """
-ʜᴇʟᴘ ᴍᴇɴᴜ ⚙️                                                                                                           
-➤ /start
-ꜱᴛᴀʀᴛ ᴛʜᴇ ʙᴏᴛ
-                                                                                                                      ➤ /help
-ᴏᴘᴇɴ ʜᴇʟᴘ ᴍᴇɴᴜ
-                                                                                                                      ➤ /about
-ᴀʙᴏᴜᴛ ᴛʜᴇ ʙᴏᴛ
-"""
-                                                                                                                      # ================= KEYBOARD =================
+# ================= KEYBOARD =================
 def main_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🌨️ Basic Guide 🌨️", callback_data="help")],
-        [
-            InlineKeyboardButton("❓ How to use", callback_data="help"),
-            InlineKeyboardButton("about 🎶", callback_data="about")
-        ],
-        [
-            InlineKeyboardButton("⚡ Updates", url="https://t.me/YUUKIUPDATES"),
-            InlineKeyboardButton("support 🌨️", url="https://t.me/team_bright_lightX")
-        ],
-        [
-            InlineKeyboardButton("🌿 Developer 🌿", url=f"https://t.me/{DEVELOPER_USERNAME}")
-        ]
+        [InlineKeyboardButton("🎯 ᴍɪɴɪ ɢᴀᴍᴇs 🎮", callback_data="games")],
+        [InlineKeyboardButton("🌿 ᴅᴇᴠᴇʟᴏᴘᴇʀ 🌿", url=f"https://t.me/{DEVELOPER_USERNAME}")]
     ])
 
-# ================= HANDLERS =================
+def games_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎲 ᴅɪᴄᴇ", callback_data="dice")],
+        [InlineKeyboardButton("🔙 ʙᴀᴄᴋ", callback_data="back")]
+    ])
+
+# ================= COMMANDS =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         START_TEXT,
@@ -68,42 +60,81 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML"
     )
 
-async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        HELP_TEXT,
-        parse_mode="HTML"
-    )
+async def dice_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    roll = random.randint(1, 6)
+    await update.message.reply_text(f"🎲 ʏᴏᴜ ʀᴏʟʟᴇᴅ : **{roll}**")
 
-async def about_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        ABOUT_TEXT,
-        parse_mode="HTML"
-    )
-
+# ================= BUTTONS =================
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
+    q = update.callback_query
+    await q.answer()
 
-    if query.data == "help":
-        await query.message.edit_text(
-            HELP_TEXT,
-            reply_markup=main_keyboard(),
-            parse_mode="HTML"
+    if q.data == "games":
+        await q.message.edit_text("🎮 ᴍɪɴɪ ɢᴀᴍᴇs", reply_markup=games_keyboard())
+    elif q.data == "dice":
+        await q.message.reply_text(f"🎲 ʏᴏᴜ ʀᴏʟʟᴇᴅ : {random.randint(1,6)}")
+    elif q.data == "back":
+        await q.message.edit_text(START_TEXT, reply_markup=main_keyboard(), parse_mode="HTML")
+
+# ================= GROQ TALKING =================
+async def talk(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.chat.type == "private" or BOTNAME.lower() in update.message.text.lower():
+        res = client.chat.completions.create(
+            model="llama3-8b-8192",
+            messages=[{"role": "user", "content": update.message.text}]
         )
-    elif query.data == "about":
-        await query.message.edit_text(
-            ABOUT_TEXT,
-            reply_markup=main_keyboard(),
-            parse_mode="HTML"
-        )
+        await update.message.reply_text(res.choices[0].message.content)
+
+# ================= GROUP MATH =================
+def generate_math(level):
+    if level == "easy":
+        a, b = random.randint(1,10), random.randint(1,10)
+        return f"{a} + {b}", a+b
+    if level == "medium":
+        a, b = random.randint(10,50), random.randint(1,20)
+        return f"{a} × {b}", a*b
+    if level == "hard":
+        a, b = random.randint(50,100), random.randint(10,30)
+        return f"{a} ÷ {b}", round(a/b, 2)
+    if level == "extreme":
+        a = random.randint(5,12)
+        return f"{a}² + {a}", a*a + a
+
+async def group_tracker(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.message.chat_id
+    group_message_count[chat_id] = group_message_count.get(chat_id, 0) + 1
+
+    if chat_id in math_interval:
+        if group_message_count[chat_id] % math_interval[chat_id] == 0:
+            level = math_level.get(chat_id, "easy")
+            q, ans = generate_math(level)
+            await update.message.reply_text(f"🧠 ᴍᴀᴛʜ ᴛɪᴍᴇ ({level})\n❓ {q}")
+
+# ================= OWNER COMMANDS =================
+async def changetime(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_ID:
+        return
+    count = int(context.args[0])
+    math_interval[update.message.chat_id] = count
+    await update.message.reply_text(f"⏱ ᴍᴀᴛʜ ᴇᴠᴇʀʏ {count} ᴍᴇssᴀɢᴇs")
+
+async def level_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_ID:
+        return
+    lvl = context.args[0]
+    math_level[update.message.chat_id] = lvl
+    await update.message.reply_text(f"🧠 ᴍᴀᴛʜ ʟᴇᴠᴇʟ sᴇᴛ : {lvl}")
 
 # ================= RUN =================
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("help", help_cmd))
-app.add_handler(CommandHandler("about", about_cmd))
+app.add_handler(CommandHandler("dice", dice_cmd))
+app.add_handler(CommandHandler("changetime", changetime))
+app.add_handler(CommandHandler("level", level_cmd))
 app.add_handler(CallbackQueryHandler(buttons))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, talk))
+app.add_handler(MessageHandler(filters.ALL, group_tracker))
 
-print("🤖 Bot is running...")
+print("🤖 Bot running...")
 app.run_polling()
