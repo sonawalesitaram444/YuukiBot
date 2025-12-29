@@ -13,7 +13,7 @@ from telegram.ext import (
 from groq import Groq
 
 # ================= CONFIG =================
-TOKEN = os.getenv("8160955111:AAH4rSihP8JQdt-AcXYGapebuuT2F-BglxA")
+TOKEN = os.getenv("BOT_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 OWNER_ID = 5773908061  # change if needed
 
