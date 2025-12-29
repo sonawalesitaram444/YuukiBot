@@ -1,1 +1,1 @@
-worker: python yuuki1.py
+worker: python bot.py
