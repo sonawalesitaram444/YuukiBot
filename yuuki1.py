@@ -14,7 +14,7 @@ from groq import Groq
 
 # ================= CONFIG =================
 TOKEN = os.getenv("8160955111:AAH4rSihP8JQdt-AcXYGapebuuT2F-BglxA")
-GROQ_API_KEY = os.getenv("GROQ_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 OWNER_ID = 5773908061  # change if needed
 
 BOTNAME = "˹ 𝐄𝐥𝐢𝐭𝐞 ✘ 𝐇ᴏꜱᴛᴇʀ ˼"
