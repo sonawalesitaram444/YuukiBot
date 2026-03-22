@@ -1,4 +1,10 @@
-python-telegram-bot==20.7
-requests
-tinydb
-groq
+python-telegram-bot==22.7
+psutil==5.9.8
+motor==3.7.1
+pymongo==4.16.0
+requests==2.32.5
+dnspython==2.8.0
+httpx==0.28.1
+pytz==2026.1.post1
+fastapi==0.135.1
+uvicorn[standard]==0.42.0
