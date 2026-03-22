@@ -3126,7 +3126,7 @@ async def promote_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         # Check target current status
         target_member = await chat.get_member(target_id)
-
+        
         if target_member.status == 'creator':
             return await message.reply_text("👑 Gʀᴏᴜᴘ Oᴡɴᴇʀ Cᴀɴ'ᴛ Bᴇ Pʀᴏᴍᴏᴛᴇᴅ.")
 
@@ -3148,8 +3148,8 @@ async def promote_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
             3: {"can_change_info": True, "can_delete_messages": True, "can_invite_users": True, "can_pin_messages": True, "can_manage_chat": True, "can_restrict_members": True, "can_promote_members": True, "can_manage_video_chats": True, "can_post_stories": True, "can_edit_stories": True, "can_delete_stories": True},
         }
 
-        # Auth check for the person sending the command
-        if user.id not in OWNER_IDS:
+        # Auth check: bypass if sender is OWNER_ID, otherwise check admin perms
+        if str(user.id) != str(OWNER_ID):
             sender_member = await chat.get_member(user.id)
             if sender_member.status not in ["administrator", "creator"] or not sender_member.can_promote_members:
                 return await message.reply_text("🧐 Oᴏᴘs! Yᴏᴜ Nᴇᴇᴅ Tᴏ Bᴇ Aᴅᴍɪɴ Tᴏ Pʀᴏᴍᴏᴛᴇ Oᴛʜᴇʀs... 🧩")
@@ -3161,10 +3161,10 @@ async def promote_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.promote_chat_member(chat.id, target_id, **perms[level])
 
         access_descriptions = {
-            3: "Fᴜʟʟ Pᴏᴡᴇʀ",
-            2: "Fᴜʟʟ Pᴏᴡᴇʀ Exᴄᴇᴘᴛ Mᴀᴋᴇ Nᴇᴡ Aᴅᴍɪɴꜱ",
-            1: "Mᴀɴᴀɢᴇ Cʜᴀᴛ, Mᴇꜱꜱᴀɢᴇꜱ & Iɴꜰᴏ",
-            0: "Pɪɴ Mᴇꜱꜱᴀɢᴇꜱ Oɴʟʏ"
+            3: "full power",
+            2: "full power except make new admins",
+            1: "manage chat, messages & info",
+            0: "pin messages only"
         }
 
         response = (
@@ -3192,7 +3192,8 @@ async def demote_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await message.reply_text("<code>⚠️ Uꜱᴀɢᴇ: /demote @username or reply to a user.</code>", parse_mode=ParseMode.HTML)
 
     try:
-        if user.id not in OWNER_IDS:
+        # Auth check: bypass if sender is OWNER_ID, otherwise check admin perms
+        if str(user.id) != str(OWNER_ID):
             sender_member = await chat.get_member(user.id)
             if sender_member.status not in ["administrator", "creator"] or not sender_member.can_promote_members:
                 return await message.reply_text("🧐 Nɪᴄᴇ ᴛʀʏ, ʙᴜᴛ ʏᴏᴜ ɴᴇᴇᴅ 'Aᴅᴅ Nᴇᴡ Aᴅᴍɪɴs' ᴘᴇʀᴍɪssɪᴏɴ ᴛᴏ ᴅᴇᴍᴏᴛᴇ! 🧩")
