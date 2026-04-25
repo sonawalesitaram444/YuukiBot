@@ -38,8 +38,37 @@ from datetime import datetime, timezone, timedelta
 # ================= WEBHOOK SETUP =================
 app = FastAPI()
 BOT_START_TIME = datetime.now(timezone.utc)
+from contextlib import asynccontextmanager
 
-from fastapi.middleware.cors import CORSMiddleware
+# ================= NEW LIFESPAN ENGINE =================
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 🟢 STARTUP: Runs when Railway starts the bot
+    base_url = os.getenv("RENDER_EXTERNAL_URL") or os.getenv("RAILWAY_STATIC_URL")
+    if base_url:
+        if not base_url.startswith("http"):
+            base_url = f"https://{base_url}"
+        webhook_url = f"{base_url}/webhook"
+        await application.bot.set_webhook(url=webhook_url, drop_pending_updates=True)
+        print(f"🚀 Webhook set to {webhook_url}")
+    
+    await application.initialize()
+    await application.start()
+    
+    # Background Tasks
+    application.job_queue.run_repeating(auto_revive_free, interval=21600, first=10)
+    application.job_queue.run_repeating(auto_coin_gift, interval=86400, first=60)
+    
+    yield # <--- Bot runs here
+    
+    # 🔴 SHUTDOWN: Runs when you stop/restart
+    await application.stop()
+    await application.shutdown()
+    print("🛑 Shutdown complete.")
+
+# ONE app, initialized with lifespan
+app = FastAPI(lifespan=lifespan)
+BOT_START_TIME = datetime.now(timezone.utc)
 
 app.add_middleware(
     CORSMiddleware,
@@ -5304,13 +5333,6 @@ async def webhook(request: Request):
     await application.process_update(update)
     return {"status": "ok"}
 
-@app.on_event("startup")
-async def on_startup():
-    """Setup webhook when Render starts the app"""
-    # RENDER_EXTERNAL_URL is automatically provided by Render
-    base_url = os.getenv("RENDER_EXTERNAL_URL")
-    webhook_url = f"{base_url}/webhook"
-
     await application.bot.set_webhook(url=webhook_url, drop_pending_updates=True)
     await application.initialize()
     await application.start()
@@ -5320,10 +5342,3 @@ async def on_startup():
     application.job_queue.run_repeating(auto_coin_gift, interval=86400, first=60)
     
     print(f"🚀 Webhook set to {webhook_url}")
-
-
-@app.on_event("shutdown")
-async def on_shutdown():
-    """Stop the bot gracefully"""
-    await application.stop()
-    await application.shutdown()
