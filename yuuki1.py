@@ -5252,93 +5252,76 @@ async def auto_revive_free(context: ContextTypes.DEFAULT_TYPE):
 
 # --- 3. FASTAPI WEBHOOK LOGIC ---
 # --- ADD THIS BELOW YOUR EXISTING @app.post("/webhook") ---
-
-@app.post("/payment_webhook")
-async def premium_auto_activate(request: Request):
-    """The entry point for MacroDroid/Phone notifications"""
-    data = await request.json()
-    raw_note = data.get("note", "") 
-
-    if "PREMIUM" in raw_note:
-        try:
-            # Note format: PREMIUM-7-5773908061
-            parts = raw_note.split("-")
-            days_to_add = int(parts[1])
-            target_id = int(parts[2])
-
-            # Map the price for the log
-            prices = {7: (20.0, "1 Week"), 30: (49.0, "1 Month"), 60: (100.0, "2 Months")}
-            amount, label = prices.get(days_to_add, (0.0, f"{days_to_add} Days"))
-
-            # Logic to handle Premium Stacking
-            now = datetime.utcnow()
-            # Note: Since you are using Motor/MongoDB, ensure 'users' is defined
-            target_data = await users.find_one({"id": target_id})
-            
-            if not target_data:
-                return {"status": "user_not_found"}
-
-            current_expire_str = target_data.get("premium_until")
-            if current_expire_str:
-                current_expire = datetime.strptime(current_expire_str, "%Y-%m-%d %H:%M:%S")
-                base_time = max(current_expire, now)
-            else:
-                base_time = now
-
-            new_expire_time = base_time + timedelta(days=days_to_add)
-            new_expire_str = new_expire_time.strftime("%Y-%m-%d %H:%M:%S")
-
-            # Update DB
-            await users.update_one(
-                {"id": target_id},
-                {"$set": {"premium": True, "premium_until": new_expire_str}}
-            )
-
-            # Get the Connected Group ID from your settings collection
-            log_config = await db.settings.find_one({"config": "log_group"})
-            target_chat = log_config["group_id"] if log_config else OWNER_ID
-
-            # Format the Premium Log Message
-            log_text = (
-                "💰 <b>Nᴇᴡ Pᴀʏᴍᴇɴᴛ Rᴇᴄᴇɪᴠᴇᴅ!</b>\n\n"
-                f"👤 <b>User ID:</b> <code>{target_id}</code>\n"
-                f"💵 <b>Amount:</b> ₹{amount}\n"
-                f"⏳ <b>Premium Added:</b> {label}\n"
-                f"📅 <b>Expiry:</b> <code>{new_expire_str}</code>\n"
-                f"🔗 <b>User Link:</b> <a href='tg://user?id={target_id}'>Profile</a>"
-            )
-
-            # Send to Log Group
-            await application.bot.send_message(target_chat, log_text, parse_mode="HTML")
-            
-            # Notify User
-            await application.bot.send_message(target_id, "🎉 <b>Yᴏᴜʀ Pʀᴇᴍɪᴜᴍ ʜᴀs ʙᴇᴇɴ ᴀᴄᴛɪᴠᴀᴛᴇᴅ!</b>")
-
-            return {"status": "success"}
-        except Exception as e:
-            print(f"Payment Webhook Error: {e}")
-            return {"status": "error"}
-
-    return {"status": "ignored"}
-
-
-from fastapi import FastAPI, Request
-import uvicorn
+# --- FASTAPI ENDPOINTS ---
 
 @app.post("/webhook")
 async def webhook(request: Request):
     """The entry point for Telegram updates"""
-    json_str = await request.json()
-    update = Update.de_json(json_str, application.bot)
-    await application.process_update(update)
-    return {"status": "ok"}
+    try:
+        json_str = await request.json()
+        update = Update.de_json(json_str, application.bot)
+        await application.process_update(update)
+        return {"status": "ok"}
+    except Exception as e:
+        print(f"⚠️ Webhook Error: {e}")
+        return {"status": "error"}
 
-    await application.bot.set_webhook(url=webhook_url, drop_pending_updates=True)
-    await application.initialize()
-    await application.start()
-    
-    application.job_queue.run_repeating(auto_revive_free, interval=21600, first=10)
+@app.post("/payment_webhook")
+async def premium_auto_activate(request: Request):
+    """Entry point for payment notifications"""
+    try:
+        data = await request.json()
+        raw_note = data.get("note", "") 
+        if "PREMIUM" not in raw_note:
+            return {"status": "ignored"}
 
-    application.job_queue.run_repeating(auto_coin_gift, interval=86400, first=60)
-    
-    print(f"🚀 Webhook set to {webhook_url}")
+        # Note format: PREMIUM-7-5773908061
+        parts = raw_note.split("-")
+        days_to_add = int(parts[1])
+        target_id = int(parts[2])
+
+        prices = {7: (20.0, "1 Week"), 30: (49.0, "1 Month"), 60: (100.0, "2 Months")}
+        amount, label = prices.get(days_to_add, (0.0, f"{days_to_add} Days"))
+
+        now = datetime.now(timezone.utc)
+        target_data = await users_async.find_one({"id": target_id})
+        
+        if not target_data:
+            return {"status": "user_not_found"}
+
+        current_expire_str = target_data.get("premium_until")
+        if current_expire_str:
+            current_expire = datetime.strptime(current_expire_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+            base_time = max(current_expire, now)
+        else:
+            base_time = now
+
+        new_expire_time = base_time + timedelta(days=days_to_add)
+        new_expire_str = new_expire_time.strftime("%Y-%m-%d %H:%M:%S")
+
+        await users_async.update_one(
+            {"id": target_id},
+            {"$set": {"premium": True, "premium_until": new_expire_str}}
+        )
+
+        log_config = await async_db.settings.find_one({"config": "log_group"})
+        target_chat = log_config["group_id"] if log_config else OWNER_ID
+
+        log_text = (
+            "💰 <b>Nᴇᴡ Pᴀʏᴍᴇɴᴛ Rᴇᴄᴇɪᴠᴇᴅ!</b>\n\n"
+            f"👤 <b>User ID:</b> <code>{target_id}</code>\n"
+            f"💵 <b>Amount:</b> ₹{amount}\n"
+            f"⏳ <b>Premium Added:</b> {label}\n"
+            f"📅 <b>Expiry:</b> <code>{new_expire_str}</code>\n"
+            f"🔗 <b>User Link:</b> <a href='tg://user?id={target_id}'>Profile</a>"
+        )
+
+        await application.bot.send_message(target_chat, log_text, parse_mode="HTML")
+        await application.bot.send_message(target_id, "🎉 <b>Yᴏᴜʀ Pʀᴇᴍɪᴜᴍ ʜᴀs ʙᴇᴇɴ ᴀᴄᴛɪᴠᴀᴛᴇᴅ!</b>", parse_mode="HTML")
+
+        return {"status": "success"}
+    except Exception as e:
+        print(f"❌ Payment Webhook Error: {e}")
+        return {"status": "error"}
+
+# --- END OF FILE ---
