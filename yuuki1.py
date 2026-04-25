@@ -19,6 +19,7 @@ import httpx
 from telegram.constants import ParseMode
 from fastapi import FastAPI, Request  
 from pymongo import MongoClient
+from fastapi.middleware.cors import CORSMiddleware
 
 from telegram import InputSticker, Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ChatAction
