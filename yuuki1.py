@@ -335,9 +335,20 @@ def load_groups_from_db():
         SAVED_GROUPS.clear()
         cursor = groups_collection.find({}) 
         for doc in cursor:
-            # Ensure the position is an integer for the dictionary key
-            pos = int(doc["pos"])
-            SAVED_GROUPS[pos] = {"name": doc["name"], "url": doc["url"]}
+            # ✅ FIX: Use .get() to avoid crashing if 'pos' or 'name' is missing
+            pos = doc.get("pos")
+            if pos is not None:
+                try:
+                    pos_int = int(pos)
+                    SAVED_GROUPS[pos_int] = {
+                        "name": doc.get("name", "Unknown Group"), 
+                        "url": doc.get("url", "#")
+                    }
+                except (ValueError, TypeError):
+                    logging.warning(f"⚠️ Skipping group with invalid pos: {pos}")
+            else:
+                logging.warning(f"⚠️ Skipping group document missing 'pos' field: {doc.get('_id')}")
+        
         logging.info(f"✅ Loaded {len(SAVED_GROUPS)} groups from Database.")
     except Exception as e:
         logging.error(f"❌ DB Load Error: {e}")
