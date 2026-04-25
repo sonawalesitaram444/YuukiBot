@@ -325,6 +325,34 @@ async def is_economy_disabled(chat_id: int) -> bool:
         return True
     return False
 
+import random
+
+# Global storage for active games
+UNO_GAMES = {} 
+UNO_COLORS = ["🔴", "🔵", "🟡", "🟢"]
+UNO_NUMBERS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+
+def create_uno_deck():
+    deck = [f"{c} {n}" for c in UNO_COLORS for n in UNO_NUMBERS]
+    random.shuffle(deck)
+    return deck
+
+def is_legal_uno_move(played, top):
+    # played: "🔴 5", top: "🔴 2"
+    p_color, p_val = played.split(" ", 1)
+    t_color, t_val = top.split(" ", 1)
+    return p_color == t_color or p_val == t_val
+
+async def send_cards_to_dm(player_id, hand, context):
+    cards_text = "🎴 <b>Yᴏᴜʀ UNO Hᴀɴᴅ:</b>\n\n"
+    cards_text += "\n".join([f"• <code>{c}</code>" for c in hand])
+    cards_text += "\n\n👉 Use <code>/flip <color_emoji> <number></code> in the group!"
+    try:
+        await context.bot.send_message(chat_id=player_id, text=cards_text, parse_mode='HTML')
+    except:
+        pass # User blocked bot or DM closed
+
+
 #======== load groups ====
 SAVED_GROUPS = {}
 
@@ -601,6 +629,119 @@ async def list_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     _, choice, page = query.data.split("_")
     await show_page(update, context, choice, int(page))
+
+async def uno_host(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    if chat_id in UNO_GAMES:
+        return await update.message.reply_text("🛑 <b>A ɢᴀᴍᴇ ɪs ᴀʟʀᴇᴀᴅʏ ɪɴ ᴘʀᴏɢʀᴇss!</b>", parse_mode='HTML')
+
+    if not context.args:
+        return await update.message.reply_text("❌ Usage: <code>/uno 500</code>", parse_mode='HTML')
+
+    try:
+        amount = int(context.args[0])
+        if amount < 100: return await update.message.reply_text("❌ Minimum bet is 100 coins.")
+
+        UNO_GAMES[chat_id] = {
+            "amount": amount,
+            "players": [update.effective_user.id],
+            "status": "LOBBY",
+            "deck": create_uno_deck(),
+            "hands": {},
+            "pile": None,
+            "turn": 0
+        }
+        await update.message.reply_text(
+            f"🃏 <b>UNO Gᴀᴍᴇ Sᴛᴀʀᴛᴇᴅ!</b>\n\n"
+            f"💰 <b>Bᴇᴛ:</b> {amount} coins\n"
+            f"👤 <b>Hᴏsᴛ:</b> {update.effective_user.first_name}\n\n"
+            f"👉 Type <code>/join</code> to enter!",
+            parse_mode='HTML'
+        )
+    except ValueError:
+        await update.message.reply_text("❌ Enter a valid number for the bet.")
+
+async def uno_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    user = update.effective_user
+    game = UNO_GAMES.get(chat_id)
+
+    if not game or game["status"] != "LOBBY": return
+    if user.id in game["players"]: return
+
+    # Check coins
+    user_data = get_user(user)
+    if user_data['coins'] < game['amount']:
+        return await update.message.reply_text("❌ You don't have enough coins!")
+
+    # Deduct coins and join
+    await users_async.update_one({"id": user.id}, {"$inc": {"coins": -game['amount']}})
+    game["players"].append(user.id)
+    
+    await update.message.reply_text(f"✅ <b>{user.first_name}</b> joined the game! ({len(game['players'])} players)")
+
+    # Auto-start at 2 players for testing, or add a /start_uno command
+    if len(game["players"]) == 2:
+        game["status"] = "STARTED"
+        # Deal cards
+        for p_id in game["players"]:
+            hand = [game["deck"].pop() for _ in range(5)]
+            game["hands"][p_id] = hand
+            await send_cards_to_dm(p_id, hand, context)
+        
+        game["pile"] = game["deck"].pop()
+        starter = await context.bot.get_chat(game["players"][0])
+        
+        await update.message.reply_text(
+            f"🚀 <b>Gᴀᴍᴇ Sᴛᴀʀᴛᴇᴅ!</b>\n"
+            f"Tᴏᴘ Cᴀʀᴅ: <code>{game['pile']}</code>\n\n"
+            f"👤 <b>Tᴜʀɴ:</b> {starter.first_name}\n"
+            f"📥 <i>Check your DMs for cards!</i>",
+            parse_mode='HTML'
+        )
+
+async def uno_flip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    game = UNO_GAMES.get(chat_id)
+    if not game or game["status"] != "STARTED": return
+
+    user = update.effective_user
+    current_player_id = game["players"][game["turn"]]
+
+    if user.id != current_player_id:
+        return # Not their turn
+
+    try:
+        played_card = f"{context.args[0]} {context.args[1]}" # e.g., "🔴 5"
+        hand = game["hands"][user.id]
+
+        if played_card in hand and is_legal_uno_move(played_card, game["pile"]):
+            hand.remove(played_card)
+            game["pile"] = played_card
+            
+            # Winner check
+            if not hand:
+                prize = int(game["amount"] * len(game["players"]) * 0.9)
+                await users_async.update_one({"id": user.id}, {"$inc": {"coins": prize, "xp": 100}})
+                await update.message.reply_text(f"🏆 <b>{user.first_name} WON THE GAME!</b>\n💰 Prize: {prize} coins", parse_mode='HTML')
+                del UNO_GAMES[chat_id]
+                return
+
+            # Next turn
+            game["turn"] = (game["turn"] + 1) % len(game["players"])
+            next_player = await context.bot.get_chat(game["players"][game["turn"]])
+            
+            await update.message.reply_text(
+                f"🃏 {user.first_name} played <b>{played_card}</b>\n"
+                f"👤 <b>Nᴇxᴛ:</b> {next_player.first_name}\n"
+                f"📥 Tᴏᴘ Cᴀʀᴅ: <code>{game['pile']}</code>",
+                parse_mode='HTML'
+            )
+            await send_cards_to_dm(user.id, hand, context)
+        else:
+            await update.message.reply_text("❌ Invalid move! Check card or color.")
+    except:
+        await update.message.reply_text("❌ Use: <code>/flip 🔴 5</code>", parse_mode='HTML')
 
 
 #======= voice =======
@@ -5220,6 +5361,10 @@ application.add_handler(CommandHandler("check", check_protection))
 application.add_handler(CommandHandler("close", close_economy))
 application.add_handler(CommandHandler("open", open_economy))
 application.add_handler(CommandHandler("connect", connect_log_group))
+application.add_handler(CommandHandler("uno", uno_host))
+application.add_handler(CommandHandler("join", uno_join))
+application.add_handler(CommandHandler("flip", uno_flip))
+
 
 # Message Handlers
 application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome))
